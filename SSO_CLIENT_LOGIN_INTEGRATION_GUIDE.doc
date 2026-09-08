@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8"/>
+<title>SSO Login API — Integration Guide</title>
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->
+<style>
+body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; color: #1a1a1a; }
+h1 { font-size: 22pt; color: #1F4E79; border-bottom: 2px solid #1F4E79; padding-bottom: 4px; }
+h2 { font-size: 16pt; color: #2E74B5; margin-top: 18px; }
+h3 { font-size: 13pt; color: #2E74B5; }
+h4 { font-size: 11.5pt; color: #404040; }
+table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+th { background: #1F4E79; color: #ffffff; text-align: left; font-size: 10pt; }
+td { font-size: 10pt; vertical-align: top; }
+tr:nth-child(even) td { background: #F2F6FB; }
+code { font-family: Consolas, monospace; background: #F1F1F1; color: #C7254E; padding: 0 2px; }
+pre { font-family: Consolas, monospace; background: #F6F8FA; border: 1px solid #DDDDDD; padding: 8px; font-size: 9.5pt; white-space: pre-wrap; }
+blockquote { border-left: 4px solid #2E74B5; margin: 8px 0; padding: 4px 12px; background: #F2F6FB; color: #444; }
+a { color: #2E74B5; text-decoration: none; }
+hr { border: none; border-top: 1px solid #CCCCCC; }
+ul { margin: 6px 0; }
+li { margin: 2px 0; }
+</style>
+</head>
+<body>
+
+<h1>SSO Login API &#8212; Integration Guide</h1>
+<p>This guide explains how your application signs an employee in to the AKOS MD patient portal
+without asking them for a separate username or password. Your system authenticates the employee,
+then calls one API with your issued credentials and the employee's details. The API returns an
+access token that represents that employee on the portal.</p>
+
+<ul>
+<li><b>Audience:</b> the development team integrating with AKOS MD</li>
+<li><b>Protocol:</b> HTTPS &#183; JSON</li>
+<li><b>Endpoint:</b> <code>POST /api/auth/sso-client-login</code></li>
+<li><b>Version:</b> 1.0</li>
+</ul>
+
+<hr/>
+
+<h2>Table of contents</h2>
+<ul>
+<li><a href="#overview">How it works</a></li>
+<li><a href="#credentials">Credentials you receive</a></li>
+<li><a href="#endpoint">Endpoint</a></li>
+<li><a href="#request">Request</a></li>
+<li><a href="#response">Success response</a></li>
+<li><a href="#token">Using the access token</a></li>
+<li><a href="#errors">Error responses</a></li>
+<li><a href="#ip">IP whitelisting</a></li>
+<li><a href="#samples">Code samples</a></li>
+<li><a href="#checklist">Go&#8209;live checklist</a></li>
+<li><a href="#practices">Recommended practices</a></li>
+<li><a href="#faq">Frequently asked questions</a></li>
+<li><a href="#support">Support</a></li>
+</ul>
+
+<hr/>
+
+<h2><a name="overview"></a>How it works</h2>
+<ol>
+<li>The employee signs in to <b>your</b> application, using whatever method you already use.</li>
+<li>Your <b>server</b> calls the SSO login API with your Client ID, your Client Secret, and the
+employee's email and name.</li>
+<li>AKOS MD verifies your credentials, then finds the employee's portal account &#8212; creating it
+automatically the first time that email is seen.</li>
+<li>The API returns an access token and the employee's portal profile.</li>
+<li>Your application opens the portal for the employee using that token.</li>
+</ol>
+
+<blockquote>You are trusted to have authenticated the employee. Never expose your Client Secret to a
+browser, mobile app, or any code the employee could inspect &#8212; the call must be made
+server&#8209;to&#8209;server.</blockquote>
+
+<h3>Employees never set a portal password</h3>
+<p>Accounts created through this API cannot be signed in to with a password on the portal login
+screen. Every session must start with a call to this API. If an employee needs a standalone portal
+password, they can use the portal's own forgot&#8209;password flow.</p>
+
+<hr/>
+
+<h2><a name="credentials"></a>Credentials you receive</h2>
+<p>AKOS MD issues the following to you before integration. Treat all of them as secrets in transit
+and store the secret the way you store any other production credential.</p>
+
+<table border="1">
+<tr><th>Credential</th><th>Description</th></tr>
+<tr><td><b>Client ID</b></td><td>Identifies the company an employee belongs to. If your organisation has several companies on the portal, you receive one Client ID per company.</td></tr>
+<tr><td><b>Parent Client ID</b></td><td>Issued only when your organisation is a group with multiple companies. It identifies the group and is the account your credentials are validated against.</td></tr>
+<tr><td><b>Client Secret</b></td><td>The shared secret proving the call comes from you. A group receives a single secret that works for every company in the group.</td></tr>
+</table>
+
+<h3>Single company</h3>
+<p>You receive a Client ID and a Client Secret. Send both on every call and omit
+<code>parent_client_id</code>.</p>
+
+<h3>Group with multiple companies</h3>
+<p>You receive a Parent Client ID, one Client ID per company, and a single Client Secret belonging
+to the parent. On every call send the Parent Client ID, the Client ID of the company the employee
+works for, and the parent's secret. You may also send the Parent Client ID as the Client ID when
+the employee works for the parent company itself.</p>
+
+<hr/>
+
+<h2><a name="endpoint"></a>Endpoint</h2>
+
+<table border="1">
+<tr><th>Item</th><th>Value</th></tr>
+<tr><td>Method</td><td><code>POST</code></td></tr>
+<tr><td>Path</td><td><code>/api/auth/sso-client-login</code></td></tr>
+<tr><td>Full URL</td><td><code>https://&lt;akos-md-host&gt;/api/auth/sso-client-login</code> &#8212; the host is supplied with your credentials</td></tr>
+<tr><td>Content type</td><td><code>application/json</code></td></tr>
+<tr><td>Authentication</td><td>None &#8212; your credentials travel in the request body</td></tr>
+<tr><td>Encryption</td><td>None at the payload level; transport security is provided by HTTPS</td></tr>
+</table>
+
+<blockquote>Some other AKOS MD endpoints expect an encrypted payload. This one does not &#8212; send
+and read plain JSON.</blockquote>
+
+<hr/>
+
+<h2><a name="request"></a>Request</h2>
+
+<h3>Body fields</h3>
+<table border="1">
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+<tr><td><code>parent_client_id</code></td><td>string</td><td>Only for groups</td><td>Your Parent Client ID. Omit it if you were not issued one.</td></tr>
+<tr><td><code>client_id</code></td><td>string</td><td>Yes</td><td>The Client ID of the company the employee belongs to.</td></tr>
+<tr><td><code>client_secret</code></td><td>string</td><td>Yes</td><td>Your Client Secret.</td></tr>
+<tr><td><code>email</code></td><td>string</td><td>Yes</td><td>The employee's email address. This identifies the account, so send the same address every time for the same person.</td></tr>
+<tr><td><code>mobile</code></td><td>string</td><td>No</td><td>The employee's mobile number. Recommended &#8212; it is used for portal notifications.</td></tr>
+<tr><td><code>firstname</code></td><td>string</td><td>Yes</td><td>The employee's first name.</td></tr>
+<tr><td><code>last_name</code></td><td>string</td><td>No</td><td>The employee's last name.</td></tr>
+</table>
+
+<p>Send only the fields listed above. Any additional field is rejected with a validation error.
+<code>first_name</code> is accepted in place of <code>firstname</code>, and <code>lastname</code> or
+<code>last-name</code> in place of <code>last_name</code>, if that suits your existing data model
+better.</p>
+
+<h3>Example &#8212; group with multiple companies</h3>
+<pre>POST /api/auth/sso-client-login
+Content-Type: application/json
+
+{
+  "parent_client_id": "&lt;your parent client id&gt;",
+  "client_id": "&lt;company client id&gt;",
+  "client_secret": "&lt;your client secret&gt;",
+  "email": "john@example.com",
+  "mobile": "9876543210",
+  "firstname": "John",
+  "last_name": "Doe"
+}</pre>
+
+<h3>Example &#8212; single company</h3>
+<pre>POST /api/auth/sso-client-login
+Content-Type: application/json
+
+{
+  "client_id": "&lt;your client id&gt;",
+  "client_secret": "&lt;your client secret&gt;",
+  "email": "jane@example.com",
+  "mobile": "9876543211",
+  "firstname": "Jane",
+  "last_name": "Roe"
+}</pre>
+
+<hr/>
+
+<h2><a name="response"></a>Success response</h2>
+<p><b>HTTP 200</b> &#8212; the employee is signed in. The same response is returned whether the
+account was just created or already existed.</p>
+
+<pre>{
+  "success": true,
+  "message": "User logged in successfully.",
+  "data": true,
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9....",
+  "userDetails": [
+    {
+      "loggedPatientId": 213,
+      "uniquePatientId": "992269",
+      "first_name": "John",
+      "last_name": "Doe",
+      "email": "john@example.com",
+      "phone": "9876543210",
+      "uuid": "6f1c0e2a-6b7d-4e3f-9a11-2c8d5f0b7e44",
+      "role": "Patient",
+      "isFirstLogin": 1,
+      "isProfileCompleted": 0,
+      "company_name": "Acme Inc"
+    }
+  ]
+}</pre>
+
+<table border="1">
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>token</code></td><td>The employee's access token. Valid for <b>24 hours</b>.</td></tr>
+<tr><td><code>userDetails</code></td><td>An array containing the employee's portal profile.</td></tr>
+<tr><td><code>loggedPatientId</code></td><td>The employee's portal identifier. Useful to log on your side for support queries.</td></tr>
+<tr><td><code>isFirstLogin</code></td><td><code>1</code> until the employee has completed their first portal session.</td></tr>
+<tr><td><code>isProfileCompleted</code></td><td><code>0</code> until the employee has filled in their portal profile. You may want to route them to the profile page when this is <code>0</code>.</td></tr>
+</table>
+
+<blockquote>Read <code>userDetails</code> as an array and take the first entry. Do not assume any
+field other than those listed will be present, and ignore fields you do not recognise &#8212; more may
+be added over time.</blockquote>
+
+<hr/>
+
+<h2><a name="token"></a>Using the access token</h2>
+<ul>
+<li>Send it on portal API calls as an <code>Authorization</code> header:
+<code>Authorization: Bearer &lt;token&gt;</code>.</li>
+<li>It expires <b>24 hours</b> after it is issued. There is no refresh call &#8212; request a new token
+by calling the SSO login API again.</li>
+<li>Request a fresh token each time the employee starts a portal session rather than caching one for
+its full lifetime.</li>
+<li>Never write the token to a shared log, a URL you did not receive from AKOS MD, or anywhere it
+could be read by another user.</li>
+</ul>
+
+<hr/>
+
+<h2><a name="errors"></a>Error responses</h2>
+<p>Every failure returns the same shape, with the reason in <code>message</code>:</p>
+<pre>{
+  "success": false,
+  "message": "Invalid client secret.",
+  "errors": []
+}</pre>
+<p>Validation failures return the individual problems in the <code>errors</code> array instead:</p>
+<pre>{
+  "success": false,
+  "errors": ["\"client_secret\" is required"]
+}</pre>
+
+<table border="1">
+<tr><th>HTTP</th><th>Message</th><th>What it means &amp; what to do</th></tr>
+<tr><td>400</td><td>Validation messages in <code>errors</code></td><td>A field is missing, malformed, or not recognised. Check the field list above; a common cause is an extra field or a mistyped email.</td></tr>
+<tr><td>401</td><td>Invalid parent client id.</td><td>The Parent Client ID is wrong, or that account is no longer active. Confirm the value with AKOS MD.</td></tr>
+<tr><td>401</td><td>Invalid client id.</td><td>The Client ID is wrong, or that company is no longer active. Confirm the value with AKOS MD.</td></tr>
+<tr><td>401</td><td>Invalid client secret.</td><td>The secret does not match. If your organisation is a group, make sure you are sending the <b>parent's</b> secret and that <code>parent_client_id</code> is included.</td></tr>
+<tr><td>401</td><td>The client id does not belong to the given parent client id.</td><td>The Client ID is not one of the companies in your group. Check the pairing with AKOS MD.</td></tr>
+<tr><td>403</td><td>API access is not enabled for this client.</td><td>SSO has not been switched on for that account yet. Contact AKOS MD.</td></tr>
+<tr><td>403</td><td>Your IP address is not whitelisted for this client.</td><td>The call came from a server address that has not been registered. See <a href="#ip">IP whitelisting</a>.</td></tr>
+<tr><td>403</td><td>This user belongs to another client.</td><td>That email already has a portal account under a different company. Confirm the employee's company, or contact AKOS MD if they have genuinely moved.</td></tr>
+<tr><td>400</td><td>Unable to create the user.</td><td>The account could not be created. Retry once; if it persists, contact AKOS MD with the email and timestamp.</td></tr>
+<tr><td>404</td><td>No patient found with the provided email.</td><td>The account could not be read back. Retry once; if it persists, contact AKOS MD.</td></tr>
+</table>
+
+<h3>How to handle errors</h3>
+<ul>
+<li><b>400</b> &#8212; a bug in your request. Fix the payload; retrying unchanged will not help.</li>
+<li><b>401 / 403</b> &#8212; a configuration or credential problem. Do not retry in a loop; surface a
+"sign&#8209;in unavailable" message to the employee and raise it with AKOS MD.</li>
+<li><b>Network timeout or 5xx</b> &#8212; retry once after a short delay. Repeating the same call is
+safe: it will not create a duplicate account.</li>
+</ul>
+
+<hr/>
+
+<h2><a name="ip"></a>IP whitelisting</h2>
+<p>IP whitelisting is optional and is agreed during onboarding. When it is enabled for your account,
+calls are accepted only from server addresses you have registered with AKOS MD.</p>
+<ul>
+<li>Send AKOS MD the public outbound IP addresses of every server that will call the API, including
+staging and disaster&#8209;recovery hosts.</li>
+<li>Tell AKOS MD in advance whenever those addresses change &#8212; an unregistered address is rejected
+with <b>403 Your IP address is not whitelisted for this client.</b></li>
+<li>If your traffic leaves through a NAT gateway, load balancer, or proxy, register the address that
+gateway presents to the internet, not the private address of the application server.</li>
+<li>For a group, the whitelist is held at the group level and covers all of its companies.</li>
+</ul>
+
+<hr/>
+
+<h2><a name="samples"></a>Code samples</h2>
+
+<h3>curl</h3>
+<pre>curl -X POST https://&lt;akos-md-host&gt;/api/auth/sso-client-login \
+  -H "Content-Type: application/json" \
+  -d '{
+        "parent_client_id": "&lt;parent client id&gt;",
+        "client_id": "&lt;client id&gt;",
+        "client_secret": "&lt;client secret&gt;",
+        "email": "john@example.com",
+        "mobile": "9876543210",
+        "firstname": "John",
+        "last_name": "Doe"
+      }'</pre>
+
+<h3>Node.js</h3>
+<pre>const response = await fetch(`${AKOS_HOST}/api/auth/sso-client-login`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    parent_client_id: process.env.AKOS_PARENT_CLIENT_ID, // omit for a single company
+    client_id: process.env.AKOS_CLIENT_ID,
+    client_secret: process.env.AKOS_CLIENT_SECRET,
+    email: employee.email,
+    mobile: employee.mobile,
+    firstname: employee.firstName,
+    last_name: employee.lastName,
+  }),
+});
+
+const result = await response.json();
+
+if (!response.ok) {
+  // result.message, or result.errors for a validation failure
+  throw new Error(result.message || (result.errors || []).join(', '));
+}
+
+const token = result.token;
+const profile = result.userDetails[0];</pre>
+
+<h3>PHP</h3>
+<pre>$payload = [
+    'parent_client_id' =&gt; getenv('AKOS_PARENT_CLIENT_ID'), // omit for a single company
+    'client_id'        =&gt; getenv('AKOS_CLIENT_ID'),
+    'client_secret'    =&gt; getenv('AKOS_CLIENT_SECRET'),
+    'email'            =&gt; $employee['email'],
+    'mobile'           =&gt; $employee['mobile'],
+    'firstname'        =&gt; $employee['first_name'],
+    'last_name'        =&gt; $employee['last_name'],
+];
+
+$ch = curl_init(getenv('AKOS_HOST') . '/api/auth/sso-client-login');
+curl_setopt_array($ch, [
+    CURLOPT_POST           =&gt; true,
+    CURLOPT_RETURNTRANSFER =&gt; true,
+    CURLOPT_HTTPHEADER     =&gt; ['Content-Type: application/json'],
+    CURLOPT_POSTFIELDS     =&gt; json_encode($payload),
+]);
+
+$body   = curl_exec($ch);
+$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
+$result = json_decode($body, true);
+
+if ($status !== 200) {
+    throw new Exception($result['message'] ?? 'SSO login failed');
+}
+
+$token   = $result['token'];
+$profile = $result['userDetails'][0];</pre>
+
+<h3>C#</h3>
+<pre>var payload = new {
+    parent_client_id = parentClientId, // omit for a single company
+    client_id        = clientId,
+    client_secret    = clientSecret,
+    email            = employee.Email,
+    mobile           = employee.Mobile,
+    firstname        = employee.FirstName,
+    last_name        = employee.LastName
+};
+
+var content  = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+var response = await httpClient.PostAsync($"{akosHost}/api/auth/sso-client-login", content);
+var body     = await response.Content.ReadAsStringAsync();
+
+if (!response.IsSuccessStatusCode)
+    throw new Exception($"SSO login failed: {body}");</pre>
+
+<hr/>
+
+<h2><a name="checklist"></a>Go&#8209;live checklist</h2>
+<ol>
+<li>Confirm the AKOS MD host name for testing and for production &#8212; they are different.</li>
+<li>Store the Client ID, Parent Client ID (if issued), and Client Secret in your server&#8209;side
+configuration or secret store, never in source control.</li>
+<li>Confirm the call is made from your <b>server</b>, not from a browser or mobile app.</li>
+<li>If IP whitelisting applies, register your production and staging outbound IP addresses.</li>
+<li>Verify a first&#8209;time employee: the account is created and a token is returned.</li>
+<li>Verify a returning employee: the same email returns a token without creating a second account.</li>
+<li>Verify your handling of each error case &#8212; at minimum a wrong secret and a malformed payload.</li>
+<li>Confirm your logs never record the Client Secret or the returned token.</li>
+<li>For a group, test at least one employee from each company Client ID.</li>
+</ol>
+
+<hr/>
+
+<h2><a name="practices"></a>Recommended practices</h2>
+<ul>
+<li><b>Server&#8209;to&#8209;server only.</b> Anyone holding your secret can obtain a token for any
+employee in your company.</li>
+<li><b>Use HTTPS.</b> The credentials are in the request body; a plain HTTP call would expose them.</li>
+<li><b>Send the employee's canonical email.</b> The email identifies the account. If it changes in
+your system, tell AKOS MD rather than sending the new address, which would create a second account.</li>
+<li><b>Send name and mobile every time.</b> They are used when the account is first created.</li>
+<li><b>Do not cache tokens across employees.</b> Each token belongs to one person.</li>
+<li><b>Fail closed.</b> If the call fails, show the employee a clear message rather than continuing
+into the portal.</li>
+<li><b>Rotate the secret periodically</b> and immediately if you suspect exposure. A rotation takes
+effect straight away; coordinate the switchover with AKOS MD.</li>
+</ul>
+
+<hr/>
+
+<h2><a name="faq"></a>Frequently asked questions</h2>
+
+<h4>Do I need to create employees in advance?</h4>
+<p>No. The account is created automatically the first time an employee signs in.</p>
+
+<h4>What happens if I call the API twice for the same employee?</h4>
+<p>Nothing is duplicated. The first call creates the account; every later call simply issues a new
+token.</p>
+
+<h4>Can an employee use the portal's normal login screen?</h4>
+<p>Not with an account created this way &#8212; no password is set. Each session starts from your
+application. An employee who wants a standalone password can set one through the portal's
+forgot&#8209;password flow.</p>
+
+<h4>How long is the token valid?</h4>
+<p>24 hours. Request a new one for each new session rather than storing it.</p>
+
+<h4>Can I look up or update an employee through this API?</h4>
+<p>No. This endpoint only signs an employee in. The response includes their current profile.</p>
+
+<h4>An employee changed companies within our group. What do I do?</h4>
+<p>Contact AKOS MD. Calling with a different Client ID for an existing email returns
+<b>403 This user belongs to another client.</b> &#8212; accounts are not moved automatically, so that a
+mistyped Client ID can never reassign someone.</p>
+
+<h4>Is there a rate limit?</h4>
+<p>Yes, a general limit applies to the AKOS MD API. Normal sign&#8209;in traffic is well within it. Do
+not use this endpoint for bulk operations or retry loops.</p>
+
+<h4>Can we test before go&#8209;live?</h4>
+<p>Yes. AKOS MD provides a test host and a separate set of credentials. Production credentials will
+not work against the test host, or the reverse.</p>
+
+<hr/>
+
+<h2><a name="support"></a>Support</h2>
+<p>When raising an issue, please include:</p>
+<ul>
+<li>The Client ID (and Parent Client ID) used &#8212; <b>never</b> the Client Secret</li>
+<li>The date and time of the call, with the time zone</li>
+<li>The HTTP status code and the <code>message</code> or <code>errors</code> returned</li>
+<li>The employee email involved</li>
+<li>The public IP address the call was made from</li>
+<li>Whether the call was against the test or the production host</li>
+</ul>
+
+</body>
+</html>

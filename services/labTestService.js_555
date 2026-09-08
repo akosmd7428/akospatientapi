@@ -1,0 +1,2015 @@
+const { sequelizeDB1 } = require('../config/sequelize');
+const { QueryTypes } = require('sequelize');
+const LabTestPrescription = require('../models/labTestPrescriptions');
+const LabCity = require('../models/labCity');
+const LabOrder = require('../models/labOrder');
+const LabOrderDetails = require('../models/labOrderDetails');
+const Cart = require('../models/cart');
+const CartDetails = require('../models/cartDetail');
+const fs = require('fs').promises;    
+const path = require('path');
+const { logError } = require('../helpers/logErrorHelper');
+const { PATIENT_BACKEND_URL, DEV_PAYUMONEY_LINK, DEV_PAYU_MONEY_SALT, DEV_PAYU_MONEY_KEY, DEV_PAYU_SUCCESS_URL, DEV_PAYU_FAILED_URL, DEV_PAYU_CANCEL_URL } = require('../config/secret');
+const axios = require('axios');
+const Razorpay = require('razorpay');
+const Patient = require('../models/patientModel');
+const NotificationService = require('./notificationService');
+const { sendSms } = require('./smsService');
+const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
+const LabTestBookingAddress = require('../models/labTestBookingAddress');
+
+const PAYU_MONEY_API_URL = DEV_PAYUMONEY_LINK;
+const PAYU_MONEY_KEY = DEV_PAYU_MONEY_KEY; // Replace with your actual key
+const PAYU_MONEY_SALT = DEV_PAYU_MONEY_SALT; // Replace with your actual salt
+
+class labTestService {
+    static async getPackagesAndTests(companyId, search) {
+        const packageQuery = `
+            SELECT 
+                cp.companyId, 
+                cp.categoryId, 
+                lp.id AS labPackageId, 
+                lp.packageName, 
+                MAX(cp.type) AS type,
+                MAX(cp.mode) AS mode,
+                lc.categoryname AS categoryName,
+                MAX(lp.noOfTest) AS noOfTest,
+                GROUP_CONCAT(DISTINCT lt.name) AS tests
+            FROM connectedCompaniesLabPackages cp
+            JOIN labPackages lp ON cp.labPackageId = lp.id
+            JOIN labsCategory lc ON cp.categoryId = lc.id
+            JOIN connectedLabTestPackages cltp ON lp.id = cltp.labPackageId
+            JOIN labTests lt ON cltp.labTestId = lt.id
+            WHERE cp.companyId = :companyId AND cp.isActive = 1
+            ${search ? `AND (lp.packageName LIKE :search OR lt.name LIKE :search)` : ''}
+            GROUP BY cp.companyId, cp.categoryId, lp.id, lc.categoryname
+            ORDER BY lc.categoryname ASC;
+        `;
+
+        const testQuery = `
+            SELECT 
+                ct.companyId, 
+                ct.categoryId, 
+                lt.id AS labTestId, 
+                lt.name AS testName,
+                MAX(ct.type) AS type,
+                MAX(ct.mode) AS mode,
+                lc.categoryname AS categoryName,
+                lt.description
+            FROM connectedCompaniesLabTests ct
+            JOIN labTests lt ON ct.labTestId = lt.id
+            JOIN labsCategory lc ON ct.categoryId = lc.id
+            WHERE ct.companyId = :companyId AND ct.isActive = 1
+            ${search ? `AND lt.name LIKE :search` : ''}
+            GROUP BY ct.companyId, ct.categoryId, lt.id, lc.categoryname
+            ORDER BY lc.categoryname ASC;
+        `;
+
+        const [categoryPackages, categoryTests] = await Promise.all([
+            sequelizeDB1.query(packageQuery, {
+                replacements: { companyId, search: `%${search}%` },
+                type: sequelizeDB1.QueryTypes.SELECT
+            }),
+            sequelizeDB1.query(testQuery, {
+                replacements: { companyId, search: `%${search}%` },
+                type: sequelizeDB1.QueryTypes.SELECT
+            })
+        ]);
+
+        // Structuring the data as per the required format
+        const structuredPackages = categoryPackages.reduce((acc, item) => {
+            if (!acc[item.categoryName]) {
+                acc[item.categoryName] = [];
+            }
+            acc[item.categoryName].push({
+                // companyId: item.companyId,
+                categoryId: item.categoryId,
+                categoryName: item.categoryName,
+                packageId: item.labPackageId,
+                packageName: item.packageName,
+                packageType: item.type,
+                packageMode: item.mode,
+                noOfTest: item.noOfTest,
+                tests: item.tests ? item.tests.split(',') : []
+            });
+            return acc;
+        }, {});
+
+        const structuredTests = categoryTests.reduce((acc, item) => {
+            if (!acc[item.categoryName]) {
+                acc[item.categoryName] = [];
+            }
+            acc[item.categoryName].push({
+                // companyId: item.companyId,
+                categoryId: item.categoryId,
+                categoryName: item.categoryName,
+                testId: item.labTestId,
+                testName: item.testName,
+                testType: item.type,
+                testMode: item.mode,
+                description: item.description
+            });
+            return acc;
+        }, {});
+
+        return {
+            categoryPackages: structuredPackages,
+            categoryTests: structuredTests
+        };
+    }
+
+    static async uploadPrescription({ prescriptionFile, notes, patientId }) {
+        // let prescriptionFilePath = null;
+        // if (prescriptionFile) {
+        //     prescriptionFilePath = await this.saveImage(prescriptionFile.buffer, prescriptionFile.extension, 'prescription');
+        // }
+        return await LabTestPrescription.create({
+            prescriptionFile: prescriptionFile,
+            notes,
+            patientId,
+        });
+    }
+
+    static async saveImage(buffer, extension, type) {
+        try {
+            if (!buffer) throw new Error("No file provided");
+
+            // Extract the image extension from MIME type
+            // const extension = mimeType.split('/')[1];
+            if (!extension) throw new Error("Unable to determine file extension");
+
+            // Generate file paths
+            const year = new Date().getFullYear();
+            const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+            const timestamp = Date.now();
+            const fileName = `${type}_${timestamp}.${extension}`;
+            const dir = path.join(__dirname, '..', 'assets', year.toString(), month);
+            const filePath = path.join(dir, fileName);
+            const filePathFinal = `${PATIENT_BACKEND_URL}/assets/${year}/${month}/${fileName}`;
+
+            // Ensure the directory exists
+            await fs.mkdir(dir, { recursive: true });
+
+            // Write the image file
+            await fs.writeFile(filePath, buffer);
+
+            return filePathFinal;
+
+        } catch (error) {
+            console.error("Error while saving file:", error);
+            throw new Error("Error while saving file");
+        }
+    }
+
+    static async addToCart({ patientId, type, mode, referenceId }) {
+        // Checking cart exists or not
+        const cartDetail = await Cart.findOne( { where: { patientId } } );
+        if(cartDetail) { // Cart Exists
+            const cartCount = await CartDetails.findOne({
+                where: { cartId: cartDetail.id, patientId:patientId, type:type, referenceId:referenceId }
+            });
+            if(!cartCount){
+                return await CartDetails.create({
+                    cartId: cartDetail.id, 
+                    patientId,
+                    type,
+                    mode,
+                    referenceId
+                });
+            }else{
+                throw new Error("This item already added into cart");
+            }
+        }else{ //Cart not exists
+            const cartDetail = await Cart.create( { patientId } );
+            if(cartDetail){
+                const cartCount = await CartDetails.findOne({
+                    where: { cartId: cartDetail.id, patientId:patientId, type:type, referenceId:referenceId }
+                });
+                if(!cartCount){
+                    return await CartDetails.create({
+                        cartId: cartDetail.id, 
+                        patientId,
+                        type,
+                        mode,
+                        referenceId
+                    });
+                }else{
+                    throw new Error("This item already added into cart");
+                }
+            }
+        }   
+        throw new Error("Error while adding item into cart");
+    }
+
+    static async getAllActiveCities() {
+        try {
+            return await LabCity.findAll({ 
+                where: { isActive: true },
+                attributes: ['id', 'cityName'],
+                groupBy: ['cityName']
+            });
+        } catch (error) {
+            throw new Error(error.message);
+        }
+    }
+
+    static async getLabDetailsByCart_BK_Grouping(companyId, patientId, cityName) {
+        const query = `
+            SELECT DISTINCT
+                c.id as cartId,
+                cl.companyId,
+                cl.mode,
+                cl.labId,
+                l.labName,
+                l.description as labDescription,
+                lc.id as labCityId,
+                lc.cityName as labCityName,
+                cl.price,
+                cd.referenceId,
+                cd.type
+            FROM
+                cart c
+            LEFT JOIN
+                cartDetails cd ON cd.cartId = c.id
+            LEFT JOIN
+                connectedLabs cl ON cd.referenceId = cl.referenceId AND cd.type = cl.type
+            LEFT JOIN
+                labs l ON cl.labId = l.id
+            LEFT JOIN
+                labCities lc ON lc.cityName = :cityName
+            WHERE
+                c.patientId = :patientId
+                AND c.isActive = 1
+                AND cl.isActive = 1
+                AND cl.companyId = :companyId
+                AND lc.cityName = :cityName
+        `;
+        
+        const results = await sequelizeDB1.query(query, {
+            replacements: { companyId, patientId, cityName },
+            type: QueryTypes.SELECT
+        });
+    
+        // Organize results by referenceId
+        const groupedLabDetails = results.reduce((acc, result) => {
+            if (!acc[result.referenceId]) {
+                acc[result.referenceId] = {
+                    type: result.type,
+                    referenceId: result.referenceId,
+                    labDetails: []
+                };
+            }
+            acc[result.referenceId].labDetails.push({
+                labId: result.labId,
+                labName: result.labName,
+                labDescription: result.labDescription,
+                labCityId: result.labCityId,
+                labCityName: result.labCityName,
+                price: result.price
+            });
+    
+            return acc;
+        }, {});
+    
+        // Convert the grouped data into the desired JSON format
+        const labLists = Object.values(groupedLabDetails);
+    
+        return {
+            cartId: results.length > 0 ? results[0].cartId : null,
+            mode: results.length > 0 ? results[0].mode : null,
+            companyId: results.length > 0 ? results[0].companyId : null,
+            labLists
+        };
+    }    
+
+    static async getLabDetailsByCart(companyId, patientId, cityName) {
+        const query = `
+            SELECT DISTINCT
+                c.id as cartId,
+                cl.companyId,
+                cl.mode,
+                cl.labId,
+                l.labName,
+                l.description as labDescription,
+                lc.id as labCityId,
+                lc.cityName as labCityName,
+                cl.price
+            FROM
+                cart c
+            LEFT JOIN
+                cartDetails cd ON cd.cartId = c.id
+            LEFT JOIN
+                connectedLabs cl ON cd.referenceId = cl.referenceId AND cd.type = cl.type
+            LEFT JOIN
+                labs l ON cl.labId = l.id
+            LEFT JOIN
+                labCities lc ON lc.cityName = :cityName
+            WHERE
+                c.patientId = :patientId
+                AND c.isActive = 1
+                AND cl.isActive = 1
+                AND cl.companyId = :companyId
+                AND lc.cityName = :cityName
+        `;
+        
+        const results = await sequelizeDB1.query(query, {
+            replacements: { companyId, patientId, cityName },
+            type: QueryTypes.SELECT
+        });
+
+        // Transform results into the desired JSON format
+        const labDetails = results.map(result => ({
+            labId: result.labId,
+            labName: result.labName,
+            labDescription: result.labDescription,
+            labCityId: result.labCityId,
+            labCityName: result.labCityName,
+            price: result.price
+        }));
+
+        return {
+            cartId: results.length > 0 ? results[0].cartId : null,
+            mode: results.length > 0 ? results[0].mode : null,
+            companyId: results.length > 0 ? results[0].companyId : null,
+            labDetails
+        };
+    }
+
+    static async getBranchesByLabAndCity(labId, labCityId) {
+        const query = `
+            SELECT
+                id,
+                labId,
+                labCityId,
+                branchName,
+                branchAddress
+            FROM
+                labBranches
+            WHERE
+                labId = :labId
+                AND labCityId = :labCityId
+                AND isActive = 1;
+        `;
+        
+        return await sequelizeDB1.query(query, {
+            replacements: { labId, labCityId },
+            type: QueryTypes.SELECT
+        });
+    }
+
+    static async getTestsAndPackagesByLab(companyId, search, labId, cartId) {
+        const packageQuery = `
+            WITH CartModes AS (
+                SELECT DISTINCT mode
+                FROM cartDetails
+                WHERE cartId = :cartId
+            ),
+            ExcludedPackages AS (
+                SELECT referenceId
+                FROM cartDetails
+                WHERE cartId = :cartId AND type = 2
+            ),
+            LabPackage AS (
+                SELECT DISTINCT cp.labPackageId
+                FROM connectedCompaniesLabPackages cp
+                JOIN connectedLabs cl ON cl.referenceId = cp.labPackageId
+                WHERE cl.labId = :labId
+            )
+            SELECT 
+                cp.companyId, 
+                cp.categoryId, 
+                lp.id AS labPackageId, 
+                lp.packageName, 
+                MAX(cp.type) AS type,
+                MAX(cp.mode) AS mode,
+                lc.categoryname AS categoryName,
+                MAX(lp.noOfTest) AS noOfTest,
+                GROUP_CONCAT(DISTINCT lt.name) AS tests
+            FROM connectedCompaniesLabPackages cp
+            JOIN connectedLabs cl ON cl.companyId = cp.companyId
+            JOIN labPackages lp ON cp.labPackageId = lp.id
+            JOIN labsCategory lc ON cp.categoryId = lc.id
+            JOIN connectedLabTestPackages cltp ON lp.id = cltp.labPackageId
+            JOIN labTests lt ON cltp.labTestId = lt.id
+            LEFT JOIN cartDetails cd ON cd.referenceId = cp.labPackageId AND cd.type = 2 AND cd.cartId = :cartId
+            WHERE cp.companyId = :companyId 
+            AND cp.isActive = 1
+            AND (cp.mode IN (SELECT mode FROM CartModes))
+            AND cp.labPackageId NOT IN (SELECT referenceId FROM ExcludedPackages)
+            AND (cp.labPackageId IN (SELECT labPackageId FROM LabPackage))
+            ${search ? `AND (lp.packageName LIKE :search OR lt.name LIKE :search)` : ''}
+            GROUP BY cp.companyId, cp.categoryId, lp.id, lc.categoryname
+            ORDER BY lc.categoryname ASC`
+        ;                   
+
+        const testQuery = `
+            WITH CartModes AS (
+                SELECT DISTINCT mode
+                FROM cartDetails
+                WHERE cartId = :cartId
+            ),
+            ExcludedTests AS (
+                SELECT referenceId
+                FROM cartDetails
+                WHERE cartId = :cartId AND type = 1
+            ),
+            LabTest AS (
+                SELECT DISTINCT lt.id AS labTestId
+                FROM connectedCompaniesLabTests ct
+                JOIN labTests lt ON lt.id = ct.labTestId
+                WHERE ct.companyId IN (
+                    SELECT companyId
+                    FROM connectedLabs
+                    WHERE labId = :labId
+                )
+            )
+            SELECT 
+                ct.companyId, 
+                ct.categoryId, 
+                lt.id AS labTestId, 
+                lt.name AS testName,
+                MAX(ct.type) AS type,
+                MAX(ct.mode) AS mode,
+                lc.categoryname AS categoryName,
+                lt.description
+            FROM connectedCompaniesLabTests ct
+            JOIN connectedLabs cl ON cl.companyId = ct.companyId
+            JOIN labTests lt ON ct.labTestId = lt.id
+            JOIN labsCategory lc ON ct.categoryId = lc.id
+            LEFT JOIN cartDetails cd ON cd.referenceId = lt.id AND cd.type = 1 AND cd.cartId = :cartId
+            WHERE ct.companyId = :companyId 
+            AND ct.isActive = 1
+            AND (ct.mode IN (SELECT mode FROM CartModes))
+            AND (lt.id IN (SELECT labTestId FROM LabTest))
+            AND lt.id NOT IN (SELECT referenceId FROM ExcludedTests)
+            ${search ? `AND lt.name LIKE :search` : ''}
+            GROUP BY ct.companyId, ct.categoryId, lt.id, lc.categoryname, lt.description
+            ORDER BY lc.categoryname ASC`
+        ;
+    
+        const [categoryPackages, categoryTests] = await Promise.all([
+            sequelizeDB1.query(packageQuery, {
+                replacements: { cartId, companyId, search: `%${search}%`, labId },
+                type: QueryTypes.SELECT
+            }),
+            sequelizeDB1.query(testQuery, {
+                replacements: { cartId, companyId, search: `%${search}%`, labId },
+                type: QueryTypes.SELECT
+            })
+        ]);
+
+        // Structuring the data as per the required format
+        const structuredPackages = categoryPackages.reduce((acc, item) => {
+            if (!acc[item.categoryName]) {
+                acc[item.categoryName] = [];
+            }
+            acc[item.categoryName].push({
+                categoryId: item.categoryId,
+                categoryName: item.categoryName,
+                packageId: item.labPackageId,
+                packageName: item.packageName,
+                packageType: item.type,
+                packageMode: item.mode,
+                noOfTest: item.noOfTest,
+                tests: item.tests ? item.tests.split(',') : []
+            });
+            return acc;
+        }, {});
+
+        const structuredTests = categoryTests.reduce((acc, item) => {
+            if (!acc[item.categoryName]) {
+                acc[item.categoryName] = [];
+            }
+            acc[item.categoryName].push({
+                categoryId: item.categoryId,
+                categoryName: item.categoryName,
+                testId: item.labTestId,
+                testName: item.testName,
+                testType: item.type,
+                testMode: item.mode,
+                description: item.description
+            });
+            return acc;
+        }, {});
+
+        return {
+            packages: structuredPackages,
+            tests: structuredTests
+        };
+    }
+
+    static async getTestOrPackageDetails(id, type) {
+        let query;
+        let replacements = { id };
+
+        if (type == 2) { // Package
+            query = `
+                SELECT
+                p.id AS TestOrPackageId,
+                p.packageName AS nameOfTest,
+                p.notes AS description,
+                p.mode AS mode,
+                GROUP_CONCAT(DISTINCT t.requirements SEPARATOR ', ') AS requirementsBeforeTest,
+                'package' AS typeOfTestOrPackage,
+                p.price AS packagePrice,
+                t.id AS testId,
+                t.name AS nameOfTestsInPackages,
+                t.price AS testPrice,
+                st.id AS subTestId,
+                st.name AS nameOfSubTests,
+                st.price AS subTestPrice
+            FROM
+                labPackages p
+            JOIN
+                connectedLabTestPackages cltp ON p.id = cltp.labPackageId
+            JOIN
+                labTests t ON cltp.labTestId = t.id
+            LEFT JOIN
+                subLabTests st ON t.id = st.labTestId
+            WHERE
+                p.id = :id
+                AND p.isActive = 1
+            GROUP BY
+                p.id, t.id, st.id
+            ORDER BY
+                t.id, st.id;        
+            `;
+        } else if (type == 1) { // Test
+            query = `
+                SELECT
+                    t.id AS TestOrPackageId,
+                    t.name AS nameOfTest,
+                    t.description,
+                    t.mode AS mode,
+                    t.requirements AS requirementsBeforeTest,
+                    'test' AS typeOfTestOrPackage,
+                    t.price AS testPrice,
+                    st.id AS subTestId,
+                    st.name AS nameOfSubTests,
+                    st.price AS subTestPrice
+                FROM
+                    labTests t
+                LEFT JOIN
+                    subLabTests st ON t.id = st.labTestId
+                WHERE
+                    t.id = :id
+                    AND t.isActive = 1;
+            `;
+        } else {
+            throw new Error('Invalid type');
+        }
+
+        const details = await sequelizeDB1.query(query, {
+            replacements,
+            type: QueryTypes.SELECT
+        });
+
+        // Structure the data to match the expected format
+        if (type == 2) { // Package
+            const packageDetails = details.reduce((acc, item) => {
+                // Initialize the package object if it does not exist
+                if (!acc.TestOrPackageId) {
+                    acc = {
+                        TestOrPackageId: item.TestOrPackageId,
+                        nameOfTest: item.nameOfTest,
+                        description: item.description,
+                        requirementsBeforeTest: item.requirementsBeforeTest,
+                        typeOfTestOrPackage: item.typeOfTestOrPackage,
+                        modeOfTestOrPackage: item.mode,
+                        packagePrice: item.packagePrice,
+                        Tests: []
+                    };
+                }
+            
+                // Find the test in the existing tests array or create a new one
+                let test = acc.Tests.find(t => t.testId === item.testId);
+                if (!test) {
+                    test = {
+                        testId: item.testId,
+                        nameOfTestsInPackages: item.nameOfTestsInPackages,
+                        testPrice: item.testPrice,
+                        subTests: []
+                    };
+                    acc.Tests.push(test);
+                }
+            
+                // Add subTest if it exists
+                if (item.subTestId) {
+                    test.subTests.push({
+                        subTestId: item.subTestId,
+                        nameOfSubTests: item.nameOfSubTests,
+                        subTestPrice: item.subTestPrice
+                    });
+                }
+            
+                return acc;
+            }, {});
+            return packageDetails;
+        } else if (type == 1) { // Test
+            const testDetails = details.reduce((acc, item) => {
+                if (!acc.TestOrPackageId) {
+                    acc = {
+                        TestOrPackageId: item.TestOrPackageId,
+                        nameOfTest: item.nameOfTest,
+                        description: item.description,
+                        requirementsBeforeTest: item.requirementsBeforeTest,
+                        typeOfTestOrPackage: item.typeOfTestOrPackage,
+                        modeOfTestOrPackage: item.mode,
+                        testPrice: item.testPrice,
+                        subTests: []
+                    };
+                }
+                if (item.subTestId) {
+                    acc.subTests.push({
+                        subTestId: item.subTestId,
+                        nameOfSubTests: item.nameOfSubTests,
+                        subTestPrice: item.subTestPrice
+                    });
+                }
+                return acc;
+            }, {});
+            return testDetails;
+        }
+    }
+
+    static async removeCartItem(cartId) {
+        const query = `
+            DELETE FROM cartDetails
+            WHERE id = :cartId;
+        `;
+
+        await sequelizeDB1.query(query, {
+            replacements: { cartId },
+            type: QueryTypes.DELETE
+        });
+
+        return { success: true, message: 'Cart item removed successfully.' };
+    }
+
+    static async getCartDetailsByPatientId_BK(labId, patientId, cartId) {
+
+        let query;
+        const cartCount = await CartDetails.count({
+            where: {
+                cartId: cartId,
+                isActive: true
+            }
+        });
+        if(cartCount < 2){
+            query = `
+            WITH CartModes AS (
+                SELECT DISTINCT mode
+                FROM cartDetails
+                WHERE cartId = :cartId
+            ),
+            MinPackagePrices AS (
+                SELECT 
+                    cd.referenceId,
+                    MIN(cl.price) AS minPrice
+                FROM 
+                    cartDetails cd
+                JOIN 
+                    connectedLabs cl ON cd.referenceId = cl.referenceId AND cd.type = 2
+                WHERE 
+                    cd.cartId = :cartId
+                AND 
+                    cl.isActive = 1
+                GROUP BY 
+                    cd.referenceId
+            )
+            SELECT DISTINCT
+                c.id AS cartId,
+                cd.id AS itemId,
+                cd.type AS itemType,
+                cd.mode AS itemMode,
+                cd.referenceId,
+                c.patientId,
+                p.packageName,
+                p.noOfTest,
+                t.name AS testName,
+                t.description,
+                l.labName,
+                l.description AS labDescription,
+                CASE 
+                    WHEN cd.type = 2 THEN cl.labId -- labId for packages
+                    ELSE t.labId
+                END AS labId,
+                CASE 
+                    WHEN cd.type = 2 THEN cl.price -- Price for packages
+                    ELSE t.price
+                END AS price,
+                CASE 
+                    WHEN cd.type = 2 THEN cl.discount -- Discount for packages
+                    ELSE t.discount
+                END AS discount
+            FROM
+                cart c
+            LEFT JOIN
+                cartDetails cd ON cd.cartId = c.id
+            LEFT JOIN
+                connectedCompaniesLabPackages ccpt ON cd.referenceId = ccpt.labPackageId AND cd.type = 2
+            LEFT JOIN
+                labPackages p ON ccpt.labPackageId = p.id
+            LEFT JOIN
+                connectedCompaniesLabTests cct ON cd.referenceId = cct.labTestId AND cd.type = 1
+            LEFT JOIN
+                labTests t ON cct.labTestId = t.id
+            LEFT JOIN
+                MinPackagePrices mpp ON cd.referenceId = mpp.referenceId
+            LEFT JOIN
+                connectedLabs cl ON cd.referenceId = cl.referenceId AND cl.price = mpp.minPrice AND cl.isActive = 1
+            LEFT JOIN
+                labs l ON (cd.type = 2 AND cl.labId = l.id) OR (cd.type = 1 AND t.labId = l.id)
+            WHERE
+                c.id = :cartId
+                AND c.patientId = :patientId
+                AND cd.isDeleted = 0
+                AND c.isActive = 1
+                AND (
+                    (cd.type = 2 AND cl.price IS NOT NULL) -- Ensure price for packages
+                    OR (cd.type = 1 AND t.price IS NOT NULL) -- Ensure price for tests
+                );
+        `;
+        }else{
+            query = `
+                WITH CartModes AS (
+                    SELECT DISTINCT mode
+                    FROM cartDetails
+                    WHERE cartId = :cartId
+                )
+                SELECT DISTINCT
+                    c.id AS cartId,
+                    cd.id AS itemId,
+                    cd.type AS itemType,
+                    cd.mode AS itemMode,
+                    cd.referenceId,
+                    c.patientId,
+                    p.packageName,
+                    p.noOfTest,
+                    t.name AS testName,
+                    t.description,
+                    l.labName,
+                    l.description AS labDescription,
+                    CASE 
+                        WHEN cd.type = 2 THEN cl.labId -- labId for packages
+                        ELSE t.labId
+                    END AS labId,
+                    CASE 
+                        WHEN cd.type = 2 THEN cl.price -- Price for packages
+                        ELSE t.price
+                    END AS price,
+                    CASE 
+                        WHEN cd.type = 2 THEN cl.discount -- Discount for packages
+                        ELSE t.discount
+                    END AS discount
+                FROM
+                    cart c
+                LEFT JOIN
+                    cartDetails cd ON cd.cartId = c.id
+                LEFT JOIN
+                    connectedCompaniesLabPackages ccpt ON cd.referenceId = ccpt.labPackageId AND cd.type = 2
+                LEFT JOIN
+                    labPackages p ON ccpt.labPackageId = p.id
+                LEFT JOIN
+                    connectedCompaniesLabTests cct ON cd.referenceId = cct.labTestId AND cd.type = 1
+                LEFT JOIN
+                    labTests t ON cct.labTestId = t.id
+                LEFT JOIN
+                    connectedLabs cl ON cd.referenceId = cl.referenceId AND cl.labId = :labId AND cl.isActive = 1
+                LEFT JOIN
+                    labs l ON l.id = :labId
+                WHERE
+                    c.id = :cartId
+                    AND c.patientId = :patientId
+                    AND cd.isDeleted = 0
+                    AND c.isActive = 1
+                    AND (
+                        (cd.type = 2 AND cl.price IS NOT NULL) -- Ensure price for packages
+                        OR (cd.type = 1 AND t.price IS NOT NULL) -- Ensure price for tests
+                    );                          
+            `;
+        }
+
+        if(!cartCount){
+            return await sequelizeDB1.query(query, {
+                replacements: { cartId, patientId },
+                type: QueryTypes.SELECT
+            });
+        }else{
+            return await sequelizeDB1.query(query, {
+                replacements: { labId, cartId, patientId },
+                type: QueryTypes.SELECT
+            });
+        }
+    }
+
+    static async updateAddress(id, address, pincode, state, city, patientId){
+        const updateData = {
+            "patientId" : patientId,
+            "address" : address,
+            "zip_code" : pincode,
+            "state" : state,
+            "city" : city
+        }
+        if(id){
+            await LabTestBookingAddress.update(updateData, {
+                where: { id: patientId }
+            });
+        }else{
+            await LabTestBookingAddress.create(updateData);
+        }
+
+        return true;
+    }
+
+    static async getLabTestAddress(patientId) {
+        const labTestDetail = await LabTestBookingAddress.findOne({
+            where: { patientId },
+            order: [['createdAt', 'DESC']]
+        });
+        return labTestDetail;
+    }
+    
+    static async getLabDetail(cartId) {
+        const query = `
+            SELECT
+                c.id AS cartId,
+                l.id AS labId,
+                l.labName,
+                l.description as labDescription,
+                lc.id as labCityId,
+                lc.cityName as labCityName,
+                lb.id AS labBranchId,
+                lb.branchName,
+                lb.branchAddress
+            FROM
+                cart c
+            LEFT JOIN
+                labs l ON c.labId = l.id
+            LEFT JOIN
+                labCities lc ON c.labCityName = lc.cityName
+            LEFT JOIN
+                labBranches lb ON c.labBranchId = lb.id
+            WHERE
+                c.id = :cartId
+                AND c.isActive = 1
+                AND c.isDeleted = 0;
+        `;
+        
+        return await sequelizeDB1.query(query, {
+            replacements: { cartId },
+            type: QueryTypes.SELECT
+        });
+    }
+
+    static async getCartDetailsByCart(cartId) {
+        const query = `
+        SELECT
+            cd.id AS itemId,
+            cl.price,
+            cl.discount
+        FROM
+            cartDetails cd
+        LEFT JOIN
+            cart c ON c.id = cd.cartId
+        LEFT JOIN
+            connectedLabs cl ON cd.referenceId = cl.referenceId 
+            AND c.labId = cl.labId
+            AND cd.type = cl.type
+            AND cd.mode = cl.mode
+        WHERE
+            cd.cartId = :cartId
+            AND cd.isActive = 1
+            AND cd.isDeleted = 0;
+        `;
+    
+        const results = await sequelizeDB1.query(query, {
+            replacements: { cartId },
+            type: QueryTypes.SELECT
+        });
+    
+        return results;
+    }
+
+    static async getCartDetailsByPatientId(patientId) {
+
+        let query;
+        let cartId;
+        let labId;
+        let querySingleItemFetch;
+        const cart = await Cart.findOne({
+            where: {
+                patientId: patientId,
+                isActive: true
+            }
+        });
+        if(cart){
+            cartId = cart.id;
+        // if(cartCount > 0 && cartCount < 2){ //This case will run only when cart is having single Item
+            query = `
+            WITH CartModes AS (
+                SELECT DISTINCT mode
+                FROM cartDetails
+                WHERE cartId = :cartId
+            ),
+            MinPackagePrices AS (
+                SELECT 
+                    cd.referenceId,
+                    MIN(cl.price) AS minPrice
+                FROM 
+                    cartDetails cd
+                JOIN 
+                    connectedLabs cl ON cd.referenceId = cl.referenceId AND cd.type = 2
+                WHERE 
+                    cd.cartId = :cartId
+                AND 
+                    cl.isActive = 1
+                GROUP BY 
+                    cd.referenceId
+            )
+            SELECT DISTINCT
+                c.id AS cartId,
+                cd.id AS itemId,
+                cd.type AS itemType,
+                cd.mode AS itemMode,
+                cd.referenceId,
+                c.patientId,
+                p.packageName,
+                p.noOfTest,
+                pa.address1 AS address,
+                pa.city,
+                pa.state,
+                pa.zip_code AS pincode,
+                t.name AS testName,
+                t.description,
+                CASE 
+                    WHEN cd.mode = 1 THEN l.labName -- labName for packages
+                    ELSE NULL
+                END AS labName,
+                CASE 
+                    WHEN cd.mode = 1 THEN l.description -- labDescription for packages
+                    ELSE NULL
+                END AS labDescription,
+                CASE 
+                    WHEN cd.mode = 1 THEN cl.labId -- labId for packages
+                    ELSE NULL
+                END AS labId,
+                CASE 
+                    WHEN cd.mode = 1 THEN cl.price -- Price for packages
+                    ELSE NULL
+                END AS price,
+                CASE 
+                    WHEN cd.mode = 1 THEN cl.discount -- Discount for packages
+                    ELSE NULL
+                END AS discount
+            FROM
+                cart c
+            LEFT JOIN
+                patient pa ON pa.id = :patientId
+            LEFT JOIN
+                cartDetails cd ON cd.cartId = c.id
+            LEFT JOIN
+                connectedCompaniesLabPackages ccpt ON cd.referenceId = ccpt.labPackageId AND cd.type = 2
+            LEFT JOIN
+                labPackages p ON ccpt.labPackageId = p.id
+            LEFT JOIN
+                connectedCompaniesLabTests cct ON cd.referenceId = cct.labTestId AND cd.type = 1
+            LEFT JOIN
+                labTests t ON cct.labTestId = t.id
+            LEFT JOIN
+                MinPackagePrices mpp ON cd.referenceId = mpp.referenceId
+            LEFT JOIN
+                connectedLabs cl ON cd.referenceId = cl.referenceId AND cl.type = cd.type AND cl.isActive = 1
+            LEFT JOIN
+                labs l ON cl.labId = l.id
+            WHERE
+                c.id = :cartId
+                AND c.patientId = :patientId
+                AND cd.isDeleted = 0
+                AND c.isActive = 1
+                AND (
+                    (cd.mode = 2 AND cl.price IS NOT NULL) -- Ensure price for radiology
+                    OR (cd.mode = 1 AND cd.type = 1 AND t.price IS NOT NULL) -- Ensure price for pathology
+                    OR (cd.mode = 1 AND cd.type = 2 AND cl.price IS NOT NULL) -- Ensure price for pathology
+                ); 
+        `;
+        // }else{
+            // querySingleItemFetch = await this.getSingleCartItemQuery();
+            // query = `
+            //     WITH CartModes AS (
+            //         SELECT DISTINCT mode
+            //         FROM cartDetails
+            //         WHERE cartId = :cartId
+            //     )
+            //     MinPackagePrices AS (
+            //         SELECT 
+            //             cd.referenceId,
+            //             MIN(cl.price) AS minPrice
+            //         FROM 
+            //             cartDetails cd
+            //         JOIN 
+            //             connectedLabs cl ON cd.referenceId = cl.referenceId AND cd.type = 2
+            //         WHERE 
+            //             cd.cartId = :cartId
+            //         AND 
+            //             cl.isActive = 1
+            //         GROUP BY 
+            //             cd.referenceId
+            //     )
+            //     SELECT DISTINCT
+            //         c.id AS cartId,
+            //         cd.id AS itemId,
+            //         cd.type AS itemType,
+            //         cd.mode AS itemMode,
+            //         cd.referenceId,
+            //         c.patientId,
+            //         p.packageName,
+            //         p.noOfTest,
+            //         t.name AS testName,
+            //         t.description,
+            //         CASE 
+            //             WHEN cd.mode = 1 THEN l.labName -- labName for packages
+            //             ELSE NULL
+            //         END AS labName,
+            //         CASE 
+            //             WHEN cd.mode = 1 THEN l.description -- labDescription for packages
+            //             ELSE NULL
+            //         END AS labDescription,
+            //         CASE 
+            //             WHEN cd.mode = 1 THEN cl.labId -- labId for packages
+            //             ELSE NULL
+            //         END AS labId,
+            //         CASE 
+            //             WHEN cd.mode = 1 THEN cl.price -- Price for packages
+            //             ELSE NULL
+            //         END AS price,
+            //         CASE 
+            //             WHEN cd.mode = 1 THEN cl.discount -- Discount for packages
+            //             ELSE NULL
+            //         END AS discount
+            //     FROM
+            //         cart c
+            //     LEFT JOIN
+            //         cartDetails cd ON cd.cartId = c.id
+            //     LEFT JOIN
+            //         connectedCompaniesLabPackages ccpt ON cd.referenceId = ccpt.labPackageId AND cd.type = 2
+            //     LEFT JOIN
+            //         labPackages p ON ccpt.labPackageId = p.id
+            //     LEFT JOIN
+            //         connectedCompaniesLabTests cct ON cd.referenceId = cct.labTestId AND cd.type = 1
+            //     LEFT JOIN
+            //         labTests t ON cct.labTestId = t.id
+            //     LEFT JOIN
+            //         connectedLabs cl ON cd.referenceId = cl.referenceId AND cl.labId = c.labId AND cl.isActive = 1
+            //     LEFT JOIN
+            //         labs l ON l.id = c.labId
+            //     WHERE
+            //         c.id = :cartId
+            //         AND c.patientId = :patientId
+            //         AND cd.isDeleted = 0
+            //         AND c.isActive = 1
+            //         AND (
+            //             (cd.mode = 2 AND cl.price IS NOT NULL) -- Ensure price for radiology
+            //             OR (cd.mode = 1 AND cd.type = 1 AND t.price IS NOT NULL) -- Ensure price for pathology
+            //             OR (cd.mode = 1 AND cd.type = 2 AND cl.price IS NOT NULL) -- Ensure price for pathology
+            //         );                          
+            // `;
+        // }
+
+        // if(cartCount > 0 && cartCount < 2){
+        //     return await sequelizeDB1.query(query, {
+        //         replacements: { cartId, patientId },
+        //         type: QueryTypes.SELECT
+        //     });
+        // }else{
+                // const cartIdData = await sequelizeDB1.query(querySingleItemFetch, {
+                //     replacements: { cartId, patientId },
+                //     type: QueryTypes.SELECT
+                // });
+                // labId = cartIdData.length > 1 ? cartIdData[0].labId : 0;
+                // console.log(labId,'labId===');
+        return await sequelizeDB1.query(query, {
+            replacements: { cartId, patientId },
+            type: QueryTypes.SELECT
+        });
+        // }
+        }else{
+            throw new Error("Your cart is empty!");
+        }
+    }
+
+    static async getSingleCartItemQuery(){
+      const query = `
+        WITH CartModes AS (
+            SELECT DISTINCT mode
+            FROM cartDetails
+            WHERE cartId = :cartId
+        ),
+        MinPackagePrices AS (
+            SELECT 
+                cd.referenceId,
+                MIN(cl.price) AS minPrice
+            FROM 
+                cartDetails cd
+            JOIN 
+                connectedLabs cl ON cd.referenceId = cl.referenceId AND cd.type = 2
+            WHERE 
+                cd.cartId = :cartId
+            AND 
+                cl.isActive = 1
+            GROUP BY 
+                cd.referenceId
+        )
+        SELECT DISTINCT
+            c.id AS cartId,
+            cd.id AS itemId,
+            cd.type AS itemType,
+            cd.mode AS itemMode,
+            cd.referenceId,
+            c.patientId,
+            p.packageName,
+            p.noOfTest,
+            t.name AS testName,
+            t.description,
+            CASE 
+                WHEN cd.mode = 1 THEN l.labName -- labName for packages
+                ELSE NULL
+            END AS labName,
+            CASE 
+                WHEN cd.mode = 1 THEN l.description -- labDescription for packages
+                ELSE NULL
+            END AS labDescription,
+            CASE 
+                WHEN cd.mode = 1 THEN cl.labId -- labId for packages
+                ELSE NULL
+            END AS labId,
+            CASE 
+                WHEN cd.mode = 1 THEN cl.price -- Price for packages
+                ELSE NULL
+            END AS price,
+            CASE 
+                WHEN cd.mode = 1 THEN cl.discount -- Discount for packages
+                ELSE NULL
+            END AS discount
+        FROM
+            cart c
+        LEFT JOIN
+            cartDetails cd ON cd.cartId = c.id
+        LEFT JOIN
+            connectedCompaniesLabPackages ccpt ON cd.referenceId = ccpt.labPackageId AND cd.type = 2
+        LEFT JOIN
+            labPackages p ON ccpt.labPackageId = p.id
+        LEFT JOIN
+            connectedCompaniesLabTests cct ON cd.referenceId = cct.labTestId AND cd.type = 1
+        LEFT JOIN
+            labTests t ON cct.labTestId = t.id
+        LEFT JOIN
+            MinPackagePrices mpp ON cd.referenceId = mpp.referenceId
+        LEFT JOIN
+            connectedLabs cl ON cd.referenceId = cl.referenceId AND cl.price = mpp.minPrice AND cl.isActive = 1
+        LEFT JOIN
+            labs l ON (cd.type = 2 AND cl.labId = l.id) OR (cd.type = 1 AND t.labId = l.id)
+        WHERE
+            c.id = :cartId
+            AND c.patientId = :patientId
+            AND cd.isDeleted = 0
+            AND c.isActive = 1
+            AND (
+                (cd.type = 2 AND cl.price IS NOT NULL) -- Ensure price for packages
+                OR (cd.type = 1 AND t.price IS NOT NULL) -- Ensure price for tests
+            );
+    `;
+
+    return query;
+    }
+    static async getPrescriptionUrl(patientId) {
+        const prescription = await LabTestPrescription.findAll({
+            where: {
+                patientId: patientId,
+                isActive: true,
+                isDeleted: false
+            },
+            attributes: ['id', 'prescriptionFile'] 
+        });
+
+        if (!prescription) {
+            throw new Error('Prescription not found');
+        }
+
+        return prescription;
+    }
+
+    static async deletePrescription(prescriptionId) {
+        const prescription = await LabTestPrescription.findOne({
+            where: {
+                id: prescriptionId,
+                isActive: true,
+                isDeleted: false
+            }
+        });
+
+        if (!prescription) {
+            throw new Error('Prescription not found');
+        }
+
+        prescription.isActive = false;
+        prescription.isDeleted = true;
+        await prescription.save();
+
+        return prescription;
+    }
+
+    static async createLabOrder(data) {
+        const { orderDetails, ...orderData } = data;
+        const transaction = await sequelizeDB1.transaction();
+        
+        try {
+            const labOrder = await LabOrder.create(orderData, { transaction });
+            
+            const labOrderDetails = orderDetails.map(detail => ({
+                ...detail,
+                labOrderId: labOrder.id,
+                patientId: orderData.patientId
+            }));
+            
+            await LabOrderDetails.bulkCreate(labOrderDetails, { transaction });
+            
+            await transaction.commit();
+            
+            return labOrder;
+        } catch (error) {
+            await transaction.rollback();
+            throw error;
+        }
+    }
+
+    static async getLabOrdersByPatientId(orderId) {
+        const query = `
+            SELECT 
+                lo.id AS id,
+                lo.patientId,
+                lo.bookingDate,
+                lo.bookingTime,
+                lo.bookingAddress,
+                lo.labId,
+                lo.labCityName,
+                lo.labBranchId,
+                lo.price,
+                lo.discountApplied,
+                lo.otherCharges,
+                lo.totalPrice,
+                lo.isPaid,
+                lo.orderStatus,
+                lo.paymentStatus,
+                lo.isActive,
+                lo.isDeleted,
+                lo.createdAt,
+                lo.updatedAt,
+                lod.id AS detailId,
+                lod.labOrderId,
+                lod.patientId AS detailPatientId,
+                lod.type AS detailType,
+                lod.referenceId,
+                lod.name,
+                lod.mode,
+                lod.noOfTest AS detailNoOfTest,
+                lod.price AS detailPrice,
+                lod.discount AS detailDiscount,
+                lod.total AS detailTotal,
+                lod.isActive AS detailIsActive,
+                lod.isDeleted AS detailIsDeleted,
+                lod.createdAt AS detailCreatedAt,
+                lod.updatedAt AS detailUpdatedAt
+            FROM 
+                labOrders lo
+            LEFT JOIN 
+                labOrderDetails lod ON lo.id = lod.labOrderId
+            WHERE 
+                lo.id = :orderId
+                AND lo.isActive = true
+                AND lo.isDeleted = false;
+        `;
+
+        const results = await sequelizeDB1.query(query, {
+            replacements: { orderId },
+            type: QueryTypes.SELECT
+        });
+
+        const orders = results.reduce((acc, row) => {
+            const {
+                id,
+                patientId,
+                bookingDate,
+                bookingTime,
+                bookingAddress,
+                labId,
+                labCityName,
+                labBranchId,
+                price,
+                discountApplied,
+                otherCharges,
+                totalPrice,
+                isPaid,
+                orderStatus,
+                paymentStatus,
+                noOfTest,
+                isActive,
+                isDeleted,
+                createdAt,
+                updatedAt,
+                detailId,
+                labOrderId,
+                detailPatientId,
+                detailType,
+                referenceId,
+                name,
+                mode,
+                detailNoOfTest,
+                detailPrice,
+                detailDiscount,
+                detailTotal,
+                detailIsActive,
+                detailIsDeleted,
+                detailCreatedAt,
+                detailUpdatedAt
+            } = row;
+
+            let order = acc.find(o => o.id === id);
+            if (!order) {
+                order = {
+                    id,
+                    patientId,
+                    bookingDate,
+                    bookingTime,
+                    bookingAddress,
+                    labId,
+                    labCityName,
+                    labBranchId,
+                    price,
+                    discountApplied,
+                    otherCharges,
+                    totalPrice,
+                    isPaid,
+                    orderStatus,
+                    paymentStatus,
+                    noOfTest,
+                    isActive,
+                    isDeleted,
+                    createdAt,
+                    updatedAt,
+                    orderDetails: []
+                };
+                acc.push(order);
+            }
+
+            if (detailId) {
+                order.orderDetails.push({
+                    id: detailId,
+                    labOrderId,
+                    patientId: detailPatientId,
+                    type: detailType,
+                    referenceId,
+                    name,
+                    mode,
+                    noOfTest: detailNoOfTest,
+                    price: detailPrice,
+                    discount: detailDiscount,
+                    total: detailTotal,
+                    isActive: detailIsActive,
+                    isDeleted: detailIsDeleted,
+                    createdAt: detailCreatedAt,
+                    updatedAt: detailUpdatedAt,
+                    isFree : name === "Akos Gold" ? 1 : 0
+                });                
+            }
+
+            return acc;
+        }, []);
+
+        return orders;
+    }
+
+    static async updateLabOrder(orderId, updateData, response) {
+
+        const result = await LabOrder.update(updateData, {
+            where: { id: orderId }
+        });
+        const status = updateData.orderStatus;
+        const orderDetail = await LabOrder.findOne({
+            where: { id: orderId }
+        });
+        const patient = await Patient.findOne({ where: { id: orderDetail.patientId } });
+        if(status == "confirmed"){ // Send Notifications
+            const patientName = patient.first_name +' '+patient.last_name;
+            await emailHelperSMTP(orderDetail.patientId, patient.email, 'Lab Booking Confirmed', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking has been successfully confirmed.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            // Create SMS messages with dynamic content
+            // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been successfully confirmed. Team AkosMD`;
+
+            // await sendSms(patient.phone, patientSMSMsg, "1007143436825772656");
+            //Trigger Notification
+            const patientNotifyData = {
+                "title" : "Lab Booking Confirmed",
+                "description": `We are pleased to inform you that your lab test booking has been successfully confirmed.`,
+                "referenceId": orderDetail.patientId,
+                "role" : "patient"
+            }
+            NotificationService.createNotification(patientNotifyData);
+        }
+        if(status == "cancelled"){ // Send Notifications
+            const patientName = patient.first_name +' '+patient.last_name;
+            await emailHelperSMTP(orderDetail.patientId, patient.email, 'Lab Booking Cancelled', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking has been cancelled.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            // Create SMS messages with dynamic content
+            // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been cancelled. Team AkosMD`;
+
+            // await sendSms(patient.phone, patientSMSMsg, "1007143436825772656");
+            //Trigger Notification
+            const patientNotifyData = {
+                "title" : "Lab Booking Cancelled",
+                "description": `We are pleased to inform you that your lab test booking has been cancelled.`,
+                "referenceId": orderDetail.patientId,
+                "role" : "patient"
+            }
+            NotificationService.createNotification(patientNotifyData);
+        }
+        if(status == "Completed"){ // Send Notifications
+            const patientName = patient.first_name +' '+patient.last_name;
+            await emailHelperSMTP(orderDetail.patientId, patient.email, 'Lab Booking Completed', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking has been Completed.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            // Create SMS messages with dynamic content
+            // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been Completed. Team AkosMD`;
+
+            // await sendSms(patient.phone, patientSMSMsg, "1007143436825772656");
+            //Trigger Notification
+            const patientNotifyData = {
+                "title" : "Lab Booking Completed",
+                "description": `We are pleased to inform you that your lab test booking has been Completed.`,
+                "referenceId": orderDetail.patientId,
+                "role" : "patient"
+            }
+            NotificationService.createNotification(patientNotifyData);
+        }
+        if(status == "Report Generated"){ // Send Notifications
+            const patientName = patient.first_name +' '+patient.last_name;
+            await emailHelperSMTP(orderDetail.patientId, patient.email, 'Lab Booking Report Generated', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking Report has been Generated.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            // Create SMS messages with dynamic content
+            // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking Report has been Generated.. Team AkosMD`;
+
+            // await sendSms(patient.phone, patientSMSMsg, "1007143436825772656");
+            //Trigger Notification
+            const patientNotifyData = {
+                "title" : "Lab Booking Completed",
+                "description": `We are pleased to inform you that your lab test booking Report has been Generated.`,
+                "referenceId": orderDetail.patientId,
+                "role" : "patient"
+            }
+            NotificationService.createNotification(patientNotifyData);
+        }
+        return result;
+    }
+
+    static async updateCart(cartId, updateData) {
+        const result = await Cart.update(updateData, {
+            where: { id: cartId }
+        });
+        return result;
+    }
+    
+    static async removeCart(cartId) {
+        const cartQuery = `
+            DELETE FROM cartDetails
+            WHERE cartId = :cartId;
+        `;
+        const query = `
+            DELETE FROM cart
+            WHERE id = :cartId;
+        `;
+
+        await sequelizeDB1.query(cartQuery, {
+            replacements: { cartId },
+            type: QueryTypes.DELETE
+        });
+
+        await sequelizeDB1.query(query, {
+            replacements: { cartId },
+            type: QueryTypes.DELETE
+        });
+
+        return true;
+    }
+
+    static async getLabOrdersByPatient(patientId) {
+        let cartId='';
+        let cartCount=0;
+        try {
+            const query = `
+                SELECT DISTINCT
+                    lo.id AS labOrderId,
+                    lo.uniqueBookingId,
+                    lo.labId,
+                    l.labName,
+                    l.description AS labDescription,
+                    lod.type,
+                    lod.mode,
+                    lo.bookingDate,
+                    lo.bookingTime,
+                    lo.orderStatus,
+                    lo.labReportURL
+                FROM 
+                    labOrders lo
+                JOIN 
+                    labOrderDetails lod ON lo.id = lod.labOrderId
+                JOIN 
+                    labs l ON lo.labId = l.id
+                WHERE 
+                    lo.patientId = :patientId
+                    AND lo.isPaid = 1
+                    AND lo.isActive = true
+                    AND lo.isDeleted = false
+                    AND lod.isActive = true
+                    AND lod.isDeleted = false
+                ORDER BY 
+                    lo.id DESC
+            `;
+          
+            const results = await sequelizeDB1.query(query, {
+                replacements: { patientId },
+                type: QueryTypes.SELECT
+            });
+    
+            cartCount = await CartDetails.count({
+                where: {
+                    patientId: patientId,
+                    isActive: true
+                }
+            });
+            if(cartCount != 0){
+                const cart = await CartDetails.findOne({
+                    where: {
+                        patientId: patientId,
+                        isActive: true
+                    }
+                });
+                cartId = cart.cartId;
+            }
+            const data = {
+                "labTestList" :  results,
+                "cartId" :  cartId,
+                "cartCount" : cartCount
+            }
+            return data;
+        } catch (error) {
+            throw new Error(`Error fetching lab orders: ${error.message}`);
+        }
+    };
+
+    static async getLabOrdersForCareNavigator(status, search, filter) {
+        try {
+            let query = `
+                SELECT
+                    lo.id AS labOrderId,
+                    p.id AS patientId,
+                    lo.uniqueBookingId,
+                    lo.labId,
+                    CONCAT(p.first_name, ' ', p.last_name) AS patientName,
+                    l.labName,
+                    l.description AS labDescription,
+                    GROUP_CONCAT(DISTINCT lod.type) AS types, -- Concatenate types for each labOrderId
+                    GROUP_CONCAT(DISTINCT lod.mode) AS modes, -- Concatenate modes for each labOrderId
+                    lo.labCityName,
+                    lo.bookingDate,
+                    lo.bookingTime,
+                    lo.orderStatus,
+                    lo.labReportURL
+                FROM 
+                    labOrders lo
+                JOIN 
+                    labOrderDetails lod ON lo.id = lod.labOrderId
+                JOIN 
+                    labs l ON lo.labId = l.id
+                JOIN 
+                    patient p ON lo.patientId = p.id
+                WHERE 
+                    lo.orderStatus = :status
+                    AND lo.isPaid = 1
+                    AND lo.isActive = true
+                    AND lo.isDeleted = false
+                    AND lod.isActive = true
+                    AND lod.isDeleted = false
+            `;
+
+            // Add filtering based on the selected time range
+            switch (filter) {
+                case '1': // Last month
+                    query += ` AND lo.bookingDate >= DATE_SUB(NOW(), INTERVAL 1 MONTH) `;
+                    break;
+                case '2': // Last 6 months
+                    query += ` AND lo.bookingDate >= DATE_SUB(NOW(), INTERVAL 6 MONTH) `;
+                    break;
+                case '3': // Last 1 year
+                    query += ` AND lo.bookingDate >= DATE_SUB(NOW(), INTERVAL 1 YEAR) `;
+                    break;
+                default:
+                    break;
+            }
+
+            // Add search conditions if provided
+            if (search) {
+                query += ` AND (
+                    l.labName LIKE :search OR
+                    lo.labCityName LIKE :search OR
+                    CONCAT(p.first_name, ' ', p.last_name) LIKE :search
+                )`
+            }
+
+            query +=  ` GROUP BY
+                        lo.id,
+                        p.id,
+                        lo.uniqueBookingId,
+                        lo.labId,
+                        p.first_name,
+                        p.last_name,
+                        l.labName,
+                        l.description,
+                        lo.labCityName,
+                        lo.bookingDate,
+                        lo.bookingTime,
+                        lo.orderStatus,
+                        lo.labReportURL
+            `;
+
+            const replacements = {
+                status,
+            };
+    
+            if (search) {
+                replacements.search = `%${search}%`;
+            }
+    
+            const results = await sequelizeDB1.query(query, {
+                replacements,
+                type: QueryTypes.SELECT
+            });
+    
+            return results;
+        } catch (error) {
+            throw new Error(`Error fetching lab orders: ${error.message}`);
+        }
+    };
+
+    static async getLabOrdersForDashboard() {
+        try {
+            const query = `
+                SELECT DISTINCT
+                    lo.id AS labOrderId,
+                    lo.uniqueBookingId,
+                    lo.labId,
+                    CONCAT(p.first_name, ' ', p.last_name) AS patientName,
+                    l.labName,
+                    lo.bookingDate,
+                    lo.bookingTime,
+                    lo.orderStatus,
+                    lo.labReportURL
+                FROM 
+                    labOrders lo
+                JOIN 
+                    labs l ON lo.labId = l.id
+                JOIN 
+                    patient p ON lo.patientId = p.id
+                WHERE 
+                    lo.orderStatus = "pending"
+                    AND lo.isActive = true
+                    AND lo.isDeleted = false
+                ORDER BY 
+                    lo.bookingDate DESC
+                LIMIT 5
+            `;
+          
+            const results = await sequelizeDB1.query(query, {
+                type: QueryTypes.SELECT
+            });
+    
+            return results;
+        } catch (error) {
+            throw new Error(`Error fetching lab orders: ${error.message}`);
+        }
+    };
+
+
+    static async getLabTestsListByPatient(patientId) {
+        try {
+            const query = `
+                SELECT DISTINCT
+                    lo.id AS labOrderId,
+                    lo.id AS uniqueBookingId,
+                    lo.labId,
+                    l.labName,
+                    l.description AS labDescription,
+                    lod.type,
+                    lod.mode,
+                    lo.bookingDate,
+                    lo.bookingTime,
+                    lo.orderStatus,
+                    lo.labReportURL
+                FROM 
+                    labOrders lo
+                JOIN 
+                    labOrderDetails lod ON lo.id = lod.labOrderId
+                JOIN 
+                    labs l ON lo.labId = l.id
+                WHERE 
+                    lo.patientId = :patientId
+                    AND lo.isActive = true
+                    AND lo.isDeleted = false
+                    AND lod.isActive = true
+                    AND lod.isDeleted = false
+                    AND lo.orderStatus IN ('Completed', 'Result Awaited', 'Report Generated');
+            `;
+          
+            const results = await sequelizeDB1.query(query, {
+                replacements: { patientId },
+                type: QueryTypes.SELECT
+            });
+          
+            return results;
+        } catch (error) {
+            throw new Error(`Error fetching lab tests list: ${error.message}`);
+        }
+    };
+
+    static async purchaseLabTest(orderId, updateData, totalPrice, patientId, cartId) {
+        if (totalPrice <= 0) {
+            throw new Error('Total price must be greater than zero!');
+        }
+        // Update the LabOrder record
+        await LabOrder.update(updateData, {
+            where: { id: orderId },
+        });
+
+        // Generate the payment link
+        const paymentLink = await this.generatePaymentLink(orderId, totalPrice, patientId, cartId);
+        return paymentLink;
+    }
+
+    static async purchaseLabTestMobile(orderId, updateData, totalPrice, patientId, cartId) {
+        if (totalPrice <= 0) {
+            throw new Error('Total price must be greater than zero!');
+        }
+        // Update the LabOrder record
+        await LabOrder.update(updateData, {
+            where: { id: orderId },
+        });
+
+        // Generate the payment link
+        const paymentLink = await this.generatePaymentLinkMobile(orderId, totalPrice, patientId, cartId);
+        return paymentLink;
+    }
+    
+    // static async generatePaymentLink(orderId, totalPrice, patientId, cartId) {
+    //     try {
+    //         const payload = {
+    //             key: PAYU_MONEY_KEY,
+    //             orderId: orderId,
+    //             amount: totalPrice,
+    //             orderInfo: 'Lab Test Payment',
+    //             patientId: patientId, // Replace with actual user data
+    //             cartId: cartId, // Replace with actual user data
+    //             hash: this.generateHash(orderId, cartId, totalPrice, patientId),
+    //             returnUrl: DEV_PAYU_SUCCESS_URL,
+    //             cancelURL: DEV_PAYU_CANCEL_URL,
+    //             failedURL: DEV_PAYU_FAILED_URL,
+    //         };
+
+    //         const response = await axios.post(PAYU_MONEY_API_URL, payload);
+
+    //         if (response.status === 200 && response.data) {
+    //             return response.data;
+    //         } else {
+    //             throw new Error('Failed to generate payment link');
+    //         }
+    //     } catch (error) {
+    //         logError(
+    //             orderId,
+    //             error.response,
+    //             'labTestService.js',
+    //             'labTestPayment',
+    //             '1434',
+    //             JSON.stringify(error)
+    //         );
+    //         console.error('Error generating payment link:', error);
+    //         throw new Error('Error generating payment link');
+    //     }
+    // }
+
+    // static generateHash(orderId, cartId, totalPrice, patientId) {
+    //     const hashString = `${PAYU_MONEY_KEY}|${orderId}|${cartId}|${patientId}|${totalPrice}|${PAYU_MONEY_SALT}`;
+    //     const crypto = require('crypto');
+    //     return crypto.createHash('sha512').update(hashString).digest('hex');
+    // }
+
+    static async generatePaymentLink(orderId, totalPrice, patientId, cartId) {
+        try {        
+            const razorpayInstance = new Razorpay({
+                key_id: process.env.RAZORPAY_KEY_ID, // Your Razorpay key ID
+                key_secret: process.env.RAZORPAY_SECRET, // Your Razorpay secret
+            });
+
+            const amountInPaise = totalPrice*100;
+
+            const orderOptions = {
+                amount: amountInPaise, // Amount in paise
+                currency: 'INR',
+                receipt: `receipt_${orderId}`,
+                notes: {
+                    patientId: patientId,
+                    cartId: cartId,
+                    orderId: orderId,
+                    orderInfo: 'Lab Test Payment',
+                },
+                payment_capture: 1, // Auto-captures the payment
+            };
+
+            // Create order in Razorpay
+            const order = await razorpayInstance.orders.create(orderOptions);
+            console.log(order,'order====');
+
+            const patientDetails = await Patient.findOne({where: {id : patientId}});
+         
+            if (order && order.id && patientDetails) {
+                // order id save 
+                updateDataRazor = {
+                    "razorpay_order_id": order.id                   
+                };                
+                await LabOrder.update(updateDataRazor, {
+                    where: { id: orderId },
+                });
+                // Return the Razorpay order details
+                const returnData = {
+                    key: process.env.RAZORPAY_KEY_ID, // Razorpay key_id received from the server
+                    amount: order.amount, // Amount in currency subunits
+                    currency: order.currency,
+                    name: process.env.COMPANY_NAME, // Your business name
+                    description: 'Lab Test Payment',
+                    image: PATIENT_BACKEND_URL+"/assets/akosLogo.png",
+                    order_id: order.id, // Order ID returned by the server
+                    callback_url: PATIENT_BACKEND_URL+'/api/labs/paymentStatus',
+                    prefill: {
+                      name: patientDetails.first_name+' '+patientDetails.last_name, // Optional prefilled customer details
+                      email: patientDetails.email,
+                      contact: patientDetails.phone,
+                    },
+                    notes: {
+                        address: patientDetails.city+', '+patientDetails.state,
+                        patientId: order.notes.patientId,
+                        cartId: order.notes.cartId,
+                        orderId: order.notes.orderId,
+                        orderInfo: order.notes.orderInfo,
+                        receipt: order.receipt
+                    },
+                    status: order.status,
+                    theme: {
+                      color: '#3399cc',
+                    },
+                };
+                return returnData;
+            } else {
+                throw new Error('Failed to generate Razorpay payment link');
+            }
+        } catch (error) {
+            // Log error for debugging and throw it
+            logError(
+                orderId,
+                error.response,
+                'paymentService.js',
+                'generatePaymentLink',
+                '1434',
+                JSON.stringify(error)
+            );
+            console.error('Error generating Razorpay payment link:', error);
+            throw new Error('Error generating payment link');
+        }
+    }
+
+    static async generatePaymentLinkMobile(orderId, totalPrice, patientId, cartId) {
+        try {        
+            const razorpayInstance = new Razorpay({
+                key_id: process.env.RAZORPAY_KEY_ID, // Your Razorpay key ID
+                key_secret: process.env.RAZORPAY_SECRET, // Your Razorpay secret
+            });
+
+            const amountInPaise = totalPrice*100;
+
+            const orderOptions = {
+                amount: amountInPaise, // Amount in paise
+                currency: 'INR',
+                receipt: `receipt_${orderId}`,
+                notes: {
+                    patientId: patientId,
+                    cartId: cartId,
+                    orderId: orderId,
+                    orderInfo: 'Lab Test Payment',
+                },
+                payment_capture: 1, // Auto-captures the payment
+            };
+
+            // Create order in Razorpay
+            const order = await razorpayInstance.orders.create(orderOptions);
+            console.log(order,'order====');
+
+            const patientDetails = await Patient.findOne({where: {id : patientId}});
+         
+            if (order && order.id && patientDetails) {
+                // order id save 
+                updateDataRazor = {
+                    "razorpay_order_id": order.id                   
+                };                
+                await LabOrder.update(updateDataRazor, {
+                    where: { id: orderId },
+                });
+                // Return the Razorpay order details
+                const returnData = {
+                    key: process.env.RAZORPAY_KEY_ID, // Razorpay key_id received from the server
+                    amount: order.amount, // Amount in currency subunits
+                    currency: order.currency,
+                    name: process.env.COMPANY_NAME, // Your business name
+                    description: 'Lab Test Payment',
+                    image: PATIENT_BACKEND_URL+"/assets/akosLogo.png",
+                    order_id: order.id, // Order ID returned by the server
+                    callback_url: PATIENT_BACKEND_URL+'/api/labs/paymentStatusMobile',
+                    prefill: {
+                      name: patientDetails.first_name+' '+patientDetails.last_name, // Optional prefilled customer details
+                      email: patientDetails.email,
+                      contact: patientDetails.phone,
+                    },
+                    notes: {
+                        address: patientDetails.city+', '+patientDetails.state,
+                        patientId: order.notes.patientId,
+                        cartId: order.notes.cartId,
+                        orderId: order.notes.orderId,
+                        orderInfo: order.notes.orderInfo,
+                        receipt: order.receipt
+                    },
+                    status: order.status,
+                    theme: {
+                      color: '#3399cc',
+                    },
+                };
+                return returnData;
+            } else {
+                throw new Error('Failed to generate Razorpay payment link');
+            }
+        } catch (error) {
+            // Log error for debugging and throw it
+            logError(
+                orderId,
+                error.response,
+                'paymentService.js',
+                'generatePaymentLink',
+                '1434',
+                JSON.stringify(error)
+            );
+            console.error('Error generating Razorpay payment link:', error);
+            throw new Error('Error generating payment link');
+        }
+    }
+
+    static async getPrescriptionUploaded() {
+        const query = `
+            SELECT 
+                ltp.id, 
+                ltp.prescriptionFile, 
+                p.first_name AS patientName, 
+                p.phone, 
+                ltp.notes, 
+                DATE(ltp.createdAt) AS createdAt
+            FROM 
+                labTestPrescription ltp
+            JOIN 
+                patient p ON ltp.patientId = p.id
+            WHERE 
+                ltp.isActive = true 
+                AND ltp.isDeleted = false
+            ORDER BY 
+                ltp.createdAt DESC;
+        `;
+    
+        const prescriptions = await sequelizeDB1.query(query, {
+            type: QueryTypes.SELECT,
+        });
+    
+        // if (!prescriptions || prescriptions.length === 0) {
+        //     throw new Error('Prescriptions not found');
+        // }
+    
+        return prescriptions;
+    }
+    //
+    static async getOrderDetailsByRazorpayOrder(orderId) {
+        const orderDetail = await LabOrder.findOne({
+            where: { razorpay_order_id: orderId }
+        });
+        return orderDetail;
+    }
+  
+    
+}
+
+module.exports = labTestService;

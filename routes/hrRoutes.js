@@ -1,0 +1,43 @@
+const express = require('express');
+const HrController = require('../controllers/hrController');
+const jwtAuthHr = require('../middleware/jwtAuthHr');
+const validateSchema = require('../middleware/validateSchema');
+const { preEmpAddSchema } = require('../validation/authValidation');
+const  validateDataEncryption  = require('../middleware/validateDataEncryption');
+const router = express.Router();
+
+router.get('/profile',validateDataEncryption(), jwtAuthHr, HrController.getProfileDetails);
+router.post('/profile',validateDataEncryption(), jwtAuthHr, HrController.createOrUpdateProfile);
+router.post('/add-pre-employee',validateDataEncryption(),validateSchema(preEmpAddSchema), jwtAuthHr, HrController.createPreEmployee);
+router.get('/preEmployee',validateDataEncryption(), jwtAuthHr, HrController.getListOfPreEmployee);
+router.get('/assesmentHra', validateDataEncryption(), jwtAuthHr, HrController.getCompanyHraAssesment);
+router.get('/doctorConsultancy', validateDataEncryption(),jwtAuthHr, HrController.getEmpTookCall);
+
+router.get('/healthRisk', validateDataEncryption(), jwtAuthHr, HrController.getCardioRecords);
+router.get('/manageEmployee', validateDataEncryption(), jwtAuthHr, HrController.getEmployeeDetails);
+router.post('/disableEnableEmployee',validateDataEncryption(), jwtAuthHr, HrController.updateEmployeeStatus);
+router.post('/addEmployee',validateDataEncryption(), jwtAuthHr, HrController.createEmployeesPatient);
+router.post('/updateHrProfile',validateDataEncryption(), jwtAuthHr, HrController.createOrUpdateProfile);
+router.get('/employeeEngagement',validateDataEncryption(), jwtAuthHr, HrController.engagementOfEmployee);
+router.post('/sendReminder',validateDataEncryption(), jwtAuthHr, HrController.sendReminder);
+router.post('/send-email',validateDataEncryption(),jwtAuthHr, HrController.sendEmailhr);
+router.get('/user-module',validateDataEncryption(), jwtAuthHr, HrController.getUserModule);
+
+// router.get('/appointments',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.getAppointments);
+// router.post('/reschedule',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.rescheduleAppointment);
+// router.post('/cancel',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.cancelAppointment);
+// router.post('/approve',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.approveAppointment);
+// router.get('/patients',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.getAllPatients);
+// router.get('/myPatients',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.getMyPatients);
+// router.get('/labTests',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.getLabTests);
+// router.get('/dashboard', jwtAuthCareNavigator, CareNavigatorController.dashboard);
+// router.get('/prescriptions',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.prescriptions);
+// router.post('/updateLabOrder',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.updateLabOrder);
+// router.post('/uploadLabReport', jwtAuthCareNavigator, CareNavigatorController.uploadLabReport);
+// router.get('/getPackages',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.getPackages);
+// router.post('/updateAppointment',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.updateAppointment);
+// router.post('/send-email',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.sendEmail);
+// router.get('/orders/:orderId',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.getLabOrdersByPatient);
+// router.post('/login',validateDataEncryption(), validateSchema(loginPatientSchema), jwtAuthCareNavigator, CareNavigatorController.login);
+// router.post('/uploadPrescription',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.uploadPrescription);
+module.exports = router;

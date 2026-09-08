@@ -1,0 +1,119 @@
+const { Medication, HealthProblem, Symptom, Vaccination, Allergy, FamilyRelation, State, City, DrugForms, Frequency } = require('../models/dataModel');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { PATIENT_BACKEND_URL } = require('../config/secret');
+
+class DataService {
+    static async getAll(type) {
+        switch(type) {
+            case 'medication':
+                return await Medication.findAll({
+                    where: { isActive: true },
+                    attributes: ['id', 'categoryName', 'medicationName']
+                });
+            case 'healthProblem':
+                return await HealthProblem.findAll({
+                    where: { isActive: true },
+                    attributes: ['id', 'problemName']
+                });
+            case 'symptom':
+                return await Symptom.findAll({
+                    where: { isActive: true },
+                    attributes: ['id', 'categoryName', 'symptomsName']
+                });
+            case 'vaccination':
+                return await Vaccination.findAll({
+                    where: { isActive: true },
+                    attributes: ['id', 'categoryName', 'vaccinationName']
+                });
+            case 'allergy':
+                return await Allergy.findAll({
+                    where: { isActive: true },
+                    attributes: ['id', 'categoryName', 'allergiesName']
+                });
+            case 'familyRelations':
+                return await FamilyRelation.findAll({
+                    where: { isActive: true },
+                    attributes: ['id', 'relationName']
+                });
+            case 'drugForms':
+                return await DrugForms.findAll({
+                    where: { isActive: true },
+                    attributes: ['id', 'drugFormName']
+                });
+            case 'frequency':
+                return await Frequency.findAll({
+                    where: { isActive: true },
+                    attributes: ['id', 'frequencyName']
+                });
+            default:
+                throw new Error('Invalid type');
+        }
+    }
+
+    static async getStates() {
+        return await State.findAll({
+            attributes: [
+                'id',
+                ['name', 'state']
+            ]
+        });
+    }
+
+    static async getCitiesByStateCode(state_id) {
+        return await City.findAll({
+            where: { state_id },
+            attributes: ['id', 'city', 'state_id']
+        });
+    }
+    
+    static async uploadFile(fileData, type) {
+        // Validate input
+        if (!fileData) {
+            throw new Error('File is required.');
+        }
+
+        // Extract the Base64 content and decode it
+        const matches = fileData.match(/^data:(.+);base64,(.+)$/);
+        if (!matches) {
+            throw new Error('Invalid Base64 format.');
+        }
+
+        const mimeType = matches[1];
+        const base64Data = matches[2];
+        console.log(mimeType,'mimeType===');
+        
+        // Generate a unique filename
+        const fileExtension = mimeType.split('/')[1];
+        const fileName = `${crypto.randomBytes(16).toString('hex')}.${fileExtension}`;
+        // Define the path
+        const currentYear = new Date().getFullYear();
+        const uploadPath = path.join(__dirname, '..', 'assets', type, currentYear.toString());
+
+        // Ensure directory exists
+        if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+        }
+
+        // Define the full file path
+        const filePath = path.join(uploadPath, fileName);
+
+        // Write the file to the filesystem
+        fs.writeFileSync(filePath, base64Data, 'base64');
+
+        // Return the URL of the uploaded file
+        const fileUrl = PATIENT_BACKEND_URL+`/assets/${type}/${currentYear}/${fileName}`;
+        
+        const data = {
+            "fileName" : fileName,
+            "fileExtension" : fileExtension,
+            "fileUrl" : fileUrl
+        };
+
+        return data;
+    }
+
+}
+
+module.exports = DataService;

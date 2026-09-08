@@ -1,0 +1,78 @@
+require('dotenv').config();
+const express = require('express');
+const path = require('path');
+const { sequelizeDB1 } = require('./config/sequelize');
+const authRoutes = require('./routes/authRoutes');
+const forgotPasswordRoutes = require('./routes/forgotPasswordRoutes');
+const patientProfileRoutes = require('./routes/patientProfileRoutes');
+const helpRoutes = require('./routes/helpRoutes');
+const assessmentRoutes = require('./routes/assessmentRoutes');
+const patientAssessmentRoutes = require('./routes/patientAssessmentRoutes');
+const doctorRoutes = require('./routes/doctorRoutes');
+const patientCareTeamRoutes = require('./routes/patientCareTeamRoutes');
+const appointmentRoutes = require('./routes/appointmentRoutes');
+const patientFolderRoutes = require('./routes/patientFolderRoutes');
+const dataRoutes = require('./routes/dataRoutes');
+const labTestRoutes = require('./routes/labTestRoutes');
+const carePlanRoutes = require('./routes/carePlanRoutes');
+const opentokRoutes = require('./routes/opentokRoutes');
+const careNavigatorRoutes = require('./routes/careNavigatorRoutes');
+const prescriptionRoutes = require('./routes/prescriptionRoutes');
+const CommonHelper = require('./helpers/commonHelper');
+const { messages } = require('./config/language');
+const { STATUS_CODE } = require('./config/constant');
+const cors = require('cors');
+
+
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(express.json({ limit: '50mb' })); // Increase the limit to 50MB or as needed
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Use the cors middleware with specific options
+const corsOptions = {
+  origin: ['https://360.akosmd.in', 'http://localhost:3000', 'https://prescription.akosmd.in' ,''],
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));
+
+// Parse JSON bodies
+app.use(express.json());
+
+app.use('/api/auth', authRoutes);
+app.use('/api/forgot-password', forgotPasswordRoutes);
+app.use('/api/patient', patientProfileRoutes);
+app.use('/api/help', helpRoutes);
+app.use('/api/assessments', assessmentRoutes);
+app.use('/api/patient_assessments', patientAssessmentRoutes);
+app.use('/api/doctors', doctorRoutes);
+app.use('/api/care-team', patientCareTeamRoutes);
+app.use('/api/appointment', appointmentRoutes);
+app.use('/api/document', patientFolderRoutes);
+app.use('/api/data', dataRoutes);
+app.use('/api/labs', labTestRoutes);
+app.use('/api/care', carePlanRoutes);
+app.use('/api/opentok', opentokRoutes);
+app.use('/api', prescriptionRoutes);
+app.use('/api/careNavigator', careNavigatorRoutes);
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err);
+  CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, err.message);
+});
+
+app.use('/assets', express.static(path.join(__dirname, 'assets'))); 
+
+sequelizeDB1.sync()
+  .then(() => {
+    console.log('Database synced');
+    app.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
+    });
+  })
+  .catch(err => console.error('Unable to sync database:', err));
