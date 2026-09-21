@@ -1,4 +1,5 @@
 const VitalMonitoringService = require('../services/vitalMonitoringService');
+const { assertCanAccessPatient } = require('../helpers/authorization'); // SEC-011
 const CommonHelper = require('../helpers/commonHelper');
 const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
@@ -18,7 +19,7 @@ class VitalMonitoringController {
 
      static async getDeviceMonitoring(req, res) {
         try {
-            const { patient_id } = req.query;
+            const patient_id = await assertCanAccessPatient(req.user, req.query.patient_id ?? req.user.id); // SEC-011
             //console.log(patient_id);
             const monitoryDetails = await VitalMonitoringService.getDeviceMonitoring(patient_id);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { monitoryDetails });
@@ -30,7 +31,8 @@ class VitalMonitoringController {
     static async postVitalMonitoring(req, res) {
         try {
            
-            const { patient_id, deviceDetails} = req.body;
+            const { deviceDetails } = req.body;
+            const patient_id = await assertCanAccessPatient(req.user, req.body.patient_id ?? req.user.id); // SEC-011
             
             const flattenedFields = deviceDetails.flatMap(device =>
                 device.fields.map(field => ({
@@ -51,7 +53,8 @@ class VitalMonitoringController {
 
     static async getDetailMonitoring(req, res) {
         try {           
-            const { patient_id, device_id, from_date, to_date} = req.query;
+            const { device_id, from_date, to_date } = req.query;
+            const patient_id = await assertCanAccessPatient(req.user, req.query.patient_id ?? req.user.id); // SEC-011
            
             const monitoringData = await VitalMonitoringService.getVitalMonitoringDetails(patient_id, device_id, from_date, to_date);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { monitoringData });
@@ -61,7 +64,8 @@ class VitalMonitoringController {
     }   
     static async getDetailMonitoring(req, res) {
         try {           
-            const { patient_id, device_id, from_date, to_date} = req.query;           
+            const { device_id, from_date, to_date } = req.query;
+            const patient_id = await assertCanAccessPatient(req.user, req.query.patient_id ?? req.user.id); // SEC-011           
             const monitoringData = await VitalMonitoringService.getVitalMonitoringDetails(patient_id, device_id, from_date, to_date);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { monitoringData });
         } catch (error) {
@@ -71,7 +75,8 @@ class VitalMonitoringController {
     // get device comment 
     static async viewDeviceComment(req, res){
         try{
-            const { patient_id, device_id} = req.query;           
+            const { device_id } = req.query;
+            const patient_id = await assertCanAccessPatient(req.user, req.query.patient_id ?? req.user.id); // SEC-011           
             const deviceComments = await VitalMonitoringService.getDeviceComment(patient_id, device_id);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { deviceComments });
         }catch(error){

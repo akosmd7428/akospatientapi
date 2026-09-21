@@ -1,4 +1,5 @@
 const CarePlanService = require('../services/carePlanService');
+const { assertCanAccessPatient } = require('../helpers/authorization'); // SEC-011
 const CommonHelper = require('../helpers/commonHelper');
 const { sendEmail } = require('../helpers/emailHelper');
 const { messages } = require('../config/language');
@@ -6,7 +7,8 @@ const { STATUS_CODE } = require('../config/constant');
 
 const getCarePlanDetails = async (req, res) => {
     try {
-        const { companyId, patientId } = req.query;
+        const { companyId } = req.query;
+        const patientId = await assertCanAccessPatient(req.user, req.query.patientId ?? req.user.id); // SEC-011
 
         const carePlans = await CarePlanService.getCarePlanDetailsByCompanyId(companyId, patientId);
         return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { carePlans });

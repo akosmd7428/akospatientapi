@@ -19,7 +19,7 @@ const ChatController = {
 
     async chat(req, res) {
         const { type, search } = req.query;
-        const careCompanyIds = req.header('companyId') || null;
+        const careCompanyIds = req.user.companyIds; // SEC-009: from the signed token, not a header
         let list;
         try {
             if(type == 1){ //patient

@@ -182,21 +182,31 @@ class PatientAssessmentService {
     static async calculateSeverity(patientId, assessmentData) {
         try {
             // Extract all assessmentOptionIds from the input data
-            const assessmentOptionIds = assessmentData.map(data => data.assessmentOptionId);
-            
-            // Convert the assessmentOptionIds array into a comma-separated string
-            const idsString = assessmentOptionIds.join(',');
+            /**
+             * SEC-006: assessmentOptionId values came from req.body on routes with
+             * no Joi schema, were joined with commas and interpolated into an
+             * IN (...) clause with no replacements, giving SQL injection.
+             *
+             * They are bound as an array now, and non-integers are dropped rather
+             * than reaching the query.
+             */
+            const assessmentOptionIds = assessmentData
+                .map(data => Number(data.assessmentOptionId))
+                .filter(Number.isInteger);
 
-            // Define the raw query to get the total score
+            if (assessmentOptionIds.length === 0) {
+                return 0;
+            }
+
             const query = `
                 SELECT optionsValue
                 FROM assessmentOptions
-                WHERE id IN (${idsString})
+                WHERE id IN (:assessmentOptionIds)
             `;
 
-            // Execute the raw query
             const result = await sequelizeDB1.query(query, {
                 type: sequelizeDB1.QueryTypes.SELECT,
+                replacements: { assessmentOptionIds },
                 raw: true,
             });
 

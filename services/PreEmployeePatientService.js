@@ -1,4 +1,5 @@
 const PreEmployeePatient = require('../models/preEmployeePatientModel');
+const { toIdList } = require('../helpers/sqlSafe'); // SEC-006
 const { sequelizeDB1 } = require('../config/sequelize');
 const { QueryTypes } = require('sequelize');
 const { APPOINTMENT_STATUS } = require('../config/secret');
@@ -1191,7 +1192,7 @@ class PreEmployeePatientService {
                 FROM 
                     preemployeepatient pe              
                 WHERE 
-                 pe.companyId IN (${careCompanyIds})
+                 pe.companyId IN (${toIdList(careCompanyIds, 'company id')})
                
             `;    
              // pe.companyId = :companyId 

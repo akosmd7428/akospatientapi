@@ -101,18 +101,24 @@ const getCarePlanDetailsByCompanyId = async (companyId, patientId) => {
 
     if (carePlanIds.length > 0) {
 
+        // SEC-006: second-order injection. carePlanIds is DB-sourced today, but it
+        // was unparameterised, so any write path that landed a non-numeric value
+        // in carePlanId would have made it live. Bound as an array now.
+        const safeCarePlanIds = carePlanIds.map(Number).filter(Number.isInteger);
+
         const benefitsQuery = `
-            SELECT 
+            SELECT
                 carePlanId,
                 benefit
             FROM planBenefits
-            WHERE 
+            WHERE
                 isActive = true
-                AND carePlanId IN (${carePlanIds.join(',')});
+                AND carePlanId IN (:carePlanIds);
         `;
 
-        benefitsResults = await sequelizeDB1.query(benefitsQuery, {
+        benefitsResults = safeCarePlanIds.length === 0 ? [] : await sequelizeDB1.query(benefitsQuery, {
             type: sequelizeDB1.QueryTypes.SELECT,
+            replacements: { carePlanIds: safeCarePlanIds },
         });
     }
 

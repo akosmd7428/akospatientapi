@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { assertCanAccessPatient } = require('../helpers/authorization'); // SEC-011
 const PatientService = require('../services/patientService');
 const { createOrUpdatePatientSchema } = require('../validation/patientValidation'); // Adjust the path as needed
 const Patient = require('../models/patientModel');
@@ -379,12 +380,15 @@ class PatientController {
 
     static async updateProfile(req, res) {
         try {
-        
-            if (!req.body.patientId) {
-                throw new Error("Invalid input");
-            }
-
-            const patientDetail = await PatientService.updateProfile(req.body);
+            /**
+             * SEC-011 + SEC-013: this checked only that patientId was PRESENT, then
+             * passed the whole body to PatientService.updateProfile, which used
+             * `where: { patientId: data.patientId }`. The body chose both the values
+             * and the target row, so any authenticated user could overwrite any
+             * other patient's clinical record.
+             */
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
+            const patientDetail = await PatientService.updateProfile(patientId, req.body);
             if(patientDetail){
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Success", { patientDetail });
             }
@@ -401,11 +405,10 @@ class PatientController {
                 throw new Error("Invalid input");
             }
 
-            if (!req.body.patientId) {
-                throw new Error("Invalid input");
-            }
-
-            const patientDetail = await PatientService.updateNotes(req.body);
+            // SEC-011 + SEC-013: same defect as updateProfile. Clinical notes are
+            // staff-authored, so a patient may not write their own.
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId);
+            const patientDetail = await PatientService.updateNotes(patientId, req.body);
             if(patientDetail){
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Success", { patientDetail });
             }

@@ -1,24 +1,24 @@
 const express = require('express');
+const { requireAuth, ROLES } = require('../middleware/requireAuth'); // SEC-001
 const router = express.Router();
 const AppointmentController = require('../controllers/appointmentController');
 const { bookAppointmentValidation, rescheduleAppointmentValidation, cancelAppointmentValidation } = require('../validation/bookAppointmentValidation');
 const validateSchema = require('../middleware/validateSchema');
-const jwtAuth = require('../middleware/jwtAuth');
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
-router.post('/book',validateDataEncryption(),jwtAuth, validateSchema(bookAppointmentValidation), AppointmentController.bookAppointment);
-router.get('/get/:status',validateDataEncryption(),jwtAuth, AppointmentController.getAppointments);
-router.get('/my-medicines',validateDataEncryption(), jwtAuth, AppointmentController.myMedicines);
+router.post('/book',requireAuth(ROLES.PATIENT), validateDataEncryption(), validateSchema(bookAppointmentValidation), AppointmentController.bookAppointment);
+router.get('/get/:status',requireAuth(ROLES.PATIENT), validateDataEncryption(), AppointmentController.getAppointments);
+router.get('/my-medicines',requireAuth(ROLES.PATIENT), validateDataEncryption(), AppointmentController.myMedicines);
 
-router.post('/reschedule',validateDataEncryption(), jwtAuth, validateSchema(rescheduleAppointmentValidation), AppointmentController.rescheduleAppointment);
-router.post('/cancel',validateDataEncryption(), jwtAuth, validateSchema(cancelAppointmentValidation), AppointmentController.cancelAppointment);
+router.post('/reschedule',requireAuth(ROLES.PATIENT), validateDataEncryption(), validateSchema(rescheduleAppointmentValidation), AppointmentController.rescheduleAppointment);
+router.post('/cancel',requireAuth(ROLES.PATIENT), validateDataEncryption(), validateSchema(cancelAppointmentValidation), AppointmentController.cancelAppointment);
 
-router.get('/details/:appointmentId',validateDataEncryption(),jwtAuth, AppointmentController.getAppointmentDetails);
-router.get('/medical-records/:companyId',validateDataEncryption(), jwtAuth, AppointmentController.getMedicalRecords);
-router.get('/talkToDoctor',validateDataEncryption(), jwtAuth, AppointmentController.talkToDoctor);
-router.get('/dashboard',validateDataEncryption(),jwtAuth, AppointmentController.dashboard);
+router.get('/details/:appointmentId',requireAuth(ROLES.PATIENT), validateDataEncryption(), AppointmentController.getAppointmentDetails);
+router.get('/medical-records/:companyId',requireAuth(ROLES.PATIENT), validateDataEncryption(), AppointmentController.getMedicalRecords);
+router.get('/talkToDoctor',requireAuth(ROLES.PATIENT), validateDataEncryption(), AppointmentController.talkToDoctor);
+router.get('/dashboard',requireAuth(ROLES.PATIENT), validateDataEncryption(), AppointmentController.dashboard);
 
-router.post('/fetchCallDetails',validateDataEncryption(), jwtAuth, AppointmentController.fetchCallDetails);
+router.post('/fetchCallDetails',requireAuth(ROLES.PATIENT), validateDataEncryption(), AppointmentController.fetchCallDetails);
 
-router.post('/check-appointment-status',validateDataEncryption(), jwtAuth,validateSchema(bookAppointmentValidation), AppointmentController.checkAppointmentStatus);
+router.post('/check-appointment-status',requireAuth(ROLES.PATIENT), validateDataEncryption(), validateSchema(bookAppointmentValidation), AppointmentController.checkAppointmentStatus);
 
 module.exports = router;

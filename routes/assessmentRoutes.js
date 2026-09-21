@@ -1,24 +1,24 @@
 const express = require('express');
+const { requireAuth, ROLES } = require('../middleware/requireAuth'); // SEC-001
 const AssessmentController = require('../controllers/assessmentController');
-const jwtAuth = require('../middleware/jwtAuth'); // Middleware to check JWT
 const validateSchema = require('../middleware/validateSchema');
 const PatientAssessmentController = require('../controllers/patientAssessmentController');
 const patientAssessmentSchema = require('../validation/patientAssessmentValidator');
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
 const router = express.Router();
 
-router.get('/get',validateDataEncryption(),jwtAuth, AssessmentController.getAssessments);
-router.get('/detail/:assessmentId',validateDataEncryption(),jwtAuth, AssessmentController.getAssessmentDetails);
+router.get('/get',requireAuth(ROLES.PATIENT), validateDataEncryption(), AssessmentController.getAssessments);
+router.get('/detail/:assessmentId',requireAuth(ROLES.PATIENT), validateDataEncryption(), AssessmentController.getAssessmentDetails);
 
-router.get('/completed',validateDataEncryption(),jwtAuth, PatientAssessmentController.assessmentTakenByPatient);
-router.get('/completedDetails/:assessmentId',validateDataEncryption(), jwtAuth, PatientAssessmentController.getPatientAssessmentsDetails);
+router.get('/completed',requireAuth(ROLES.PATIENT), validateDataEncryption(), PatientAssessmentController.assessmentTakenByPatient);
+router.get('/completedDetails/:assessmentId',requireAuth(ROLES.PATIENT), validateDataEncryption(), PatientAssessmentController.getPatientAssessmentsDetails);
 
-router.post('/createBulk',validateDataEncryption(),jwtAuth, PatientAssessmentController.createPatientAssessments);
+router.post('/createBulk',requireAuth(ROLES.PATIENT), validateDataEncryption(), PatientAssessmentController.createPatientAssessments);
 
-router.get('/behaviouralHealth/:assessmentId',validateDataEncryption(),jwtAuth, AssessmentController.getBehaviouralDetails);
-router.post('/behaviouralHealth',validateDataEncryption(),jwtAuth, PatientAssessmentController.createBehaviouralHealth);
+router.get('/behaviouralHealth/:assessmentId',requireAuth(ROLES.PATIENT), validateDataEncryption(), AssessmentController.getBehaviouralDetails);
+router.post('/behaviouralHealth',requireAuth(ROLES.PATIENT), validateDataEncryption(), PatientAssessmentController.createBehaviouralHealth);
 
-// router.get('/get', jwtAuth, PatientAssessmentController.getPatientAssessments); //Ignore
-// router.post('/create', jwtAuth, PatientAssessmentController.createPatientAssessment); //Ignore
+// router.get('/get', requireAuth(ROLES.PATIENT), PatientAssessmentController.getPatientAssessments); //Ignore
+// router.post('/create', requireAuth(ROLES.PATIENT), PatientAssessmentController.createPatientAssessment); //Ignore
 
 module.exports = router;

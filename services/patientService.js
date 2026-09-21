@@ -1,4 +1,5 @@
 const PatientDetail = require('../models/patientDetailModel');
+const { toIdList } = require('../helpers/sqlSafe'); // SEC-006
 const PatientFamilyHistory = require('../models/patientFamilyHistoryModel');
 const { sequelizeDB1 } = require('../models');
 const { QueryTypes } = require('sequelize');
@@ -942,10 +943,23 @@ class PatientService {
         }
     }      
 
-    static async updateProfile(data) {
+    /**
+     * SEC-013: previously `update(data, { where: { patientId: data.patientId } })`
+     * - the untrusted body supplied both the values and the target row. The
+     * patientId is now an authorised argument, and only allow-listed columns are
+     * written.
+     */
+    static async updateProfile(patientId, data) {
+        const ALLOWED = ['medications', 'health_problems', 'medical_allergies', 'symptoms',
+                         'height', 'weight', 'bloodGroup', 'profile_image'];
+        const values = {};
+        for (const key of ALLOWED) {
+            if (data[key] !== undefined) values[key] = data[key];
+        }
+
         let response={};
-        await PatientDetail.update(data, { where: { patientId : data.patientId } });
-        const patientDetail = await PatientDetail.findOne({ where: { patientId: data.patientId } });
+        await PatientDetail.update(values, { where: { patientId }, fields: ALLOWED });
+        const patientDetail = await PatientDetail.findOne({ where: { patientId } });
         if (patientDetail) {
             response = {
                 "medications" : patientDetail.medications,
@@ -982,7 +996,7 @@ class PatientService {
                 AND ccp.connectionType = 1
                 AND ccp.status = 1
                 AND ccp.isActive = true
-               AND p.employer_id IN (${careCompanyIds}) 
+               AND p.employer_id IN (${toIdList(careCompanyIds, 'company id')}) 
         `;
     
         // Add package filter if provided
@@ -1042,7 +1056,7 @@ class PatientService {
                 p.isProfileCompleted = 1
                 AND ccp.status = 1
                 AND ccp.isActive = true
-                AND p.employer_id IN (${careCompanyIds})
+                AND p.employer_id IN (${toIdList(careCompanyIds, 'company id')})
         `;
     
         // Add package filter if provided
@@ -1091,7 +1105,7 @@ class PatientService {
             AND ccp.connectionType = 1
             AND ccp.status = 1
             AND ccp.isActive = true
-            AND p.employer_id IN (${careCompanyIds})
+            AND p.employer_id IN (${toIdList(careCompanyIds, 'company id')})
         `;
     
         const result = await sequelizeDB1.query(query, {
@@ -1114,7 +1128,7 @@ class PatientService {
             p.isProfileCompleted = 1
             AND ccp.status = 1
             AND ccp.isActive = true
-            AND p.employer_id IN (${careCompanyIds})
+            AND p.employer_id IN (${toIdList(careCompanyIds, 'company id')})
         `;
     
         const result = await sequelizeDB1.query(query, {
@@ -1125,10 +1139,11 @@ class PatientService {
         return result[0]?.totalPatients || 0;
     }
 
-    static async updateNotes(data) {
+    // SEC-013: same fix as updateProfile - only `notes` is writable here.
+    static async updateNotes(patientId, data) {
         let response={};
-        await PatientDetail.update(data, { where: { patientId : data.patientId } });
-        const patientDetail = await PatientDetail.findOne({ where: { patientId: data.patientId } });
+        await PatientDetail.update({ notes: data.notes }, { where: { patientId }, fields: ['notes'] });
+        const patientDetail = await PatientDetail.findOne({ where: { patientId } });
         if (patientDetail) {
             response = {
                 "notes" : patientDetail.notes

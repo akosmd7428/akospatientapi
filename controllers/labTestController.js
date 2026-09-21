@@ -3,6 +3,10 @@ const CommonHelper = require('../helpers/commonHelper');
 const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
 const LabOrder = require('../models/labOrder');
+const LabTestPrescription = require('../models/labTestPrescriptions');
+// SEC-011: object-level authorization for identifiers supplied by the caller.
+const { assertCanAccessPatient, assertCanAccessRecord } = require('../helpers/authorization');
+const { ROLES } = require('../middleware/requireAuth');
 
 class labTestController {
     static async getPackagesAndTests(req, res) {
@@ -17,7 +21,9 @@ class labTestController {
 
     static async uploadPrescription(req, res) {
         try {
-            const { prescriptionFile, notes, patientId } = req.body;
+            const { prescriptionFile, notes } = req.body;
+            // SEC-011: patientId came from the body with no ownership check.
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
 
             const prescription = await LabTestService.uploadPrescription({ prescriptionFile, notes, patientId });
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.prescriptionUpload, { prescription });
@@ -29,7 +35,9 @@ class labTestController {
     static async addToCart(req, res) {
         try {
            // console.log(req.body,"card Item");
-            const { type, mode, referenceId, patientId, companyId,labId,labType,code} = req.body; 
+            const { type, mode, referenceId, companyId,labId,labType,code} = req.body;
+            // SEC-011
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
 
             const cartItem = await LabTestService.addToCart({ patientId, type, mode, referenceId, companyId, labId, labType, code });
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.itemAddedToCart, { cartItem });
@@ -49,7 +57,9 @@ class labTestController {
 
     static async getLabDetailsByCart(req, res) {
         try {
-            const { companyId, patientId, cityName } = req.body;
+            const { companyId, cityName } = req.body;
+            // SEC-011
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
 
             const labDetails = await LabTestService.getLabDetailsByCart(companyId, patientId, cityName);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.labDetailsFetched, { labDetails });
@@ -60,7 +70,8 @@ class labTestController {
 
     static async getCartDetailsByPatientId(req, res) {
         try {
-            const { patientId } = req.body;
+            // SEC-011: patientId came from the body with no ownership check.
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
 
             const cartDetails = await LabTestService.getCartDetailsByPatientId(patientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.cartDetailsFetched, { cartDetails });
@@ -71,7 +82,8 @@ class labTestController {
 
     static async getUnpaidLabForItem(req, res) {
         try {
-            const { patientId } = req.body;
+            // SEC-011: patientId came from the body with no ownership check.
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
 
             const cartDetails = await LabTestService.getUnpaidLabDetails(patientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.cartDetailsFetched, { cartDetails });
@@ -141,7 +153,8 @@ class labTestController {
 
     static async getPrescriptionUrl(req, res) {
         try {
-            const { patientId } = req.params;
+            // SEC-011: patientId came from the path with no ownership check.
+            const patientId = await assertCanAccessPatient(req.user, req.params.patientId);
             const prescription = await LabTestService.getPrescriptionUrl(patientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.prescriptionFetched, { prescription });
         } catch (error) {
@@ -151,6 +164,8 @@ class labTestController {
 
     static async deletePrescription(req, res) {
         try {
+            // SEC-011: any prescription could be deleted by id, with no owner check.
+            await assertCanAccessRecord(req.user, LabTestPrescription, req.params.prescriptionId);
             const { prescriptionId } = req.params;
             await LabTestService.deletePrescription(prescriptionId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.prescriptionDeleted);
@@ -161,7 +176,12 @@ class labTestController {
 
     static async createLabOrder(req, res) {
         try {
-            const labOrder = await LabTestService.createLabOrder(req.body);
+            // SEC-013: the order is bound to the authenticated patient. Staff
+            // acting for a patient must pass an explicitly authorised patientId.
+            const patientId = req.user.role === ROLES.PATIENT
+                ? req.user.id
+                : await assertCanAccessPatient(req.user, req.body.patientId);
+            const labOrder = await LabTestService.createLabOrder(req.body, patientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.orderCreated, { labOrder });
         } catch (error) {
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
@@ -170,6 +190,8 @@ class labTestController {
 
     static async getLabOrdersByPatient(req, res) {
         try {
+            // SEC-011: the order id was read with no check that it belongs to the caller.
+            await assertCanAccessRecord(req.user, LabOrder, req.params.orderId);
             const { orderId } = req.params;
             const labOrders = await LabTestService.getLabOrdersByPatientId(orderId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.ordersFetched, { labOrders });
@@ -220,7 +242,8 @@ class labTestController {
     }    
 
     static async getLabOrders(req, res) {
-        const patientId = req.params.patientId;
+        // SEC-011
+        const patientId = await assertCanAccessPatient(req.user, req.params.patientId);
     
         try {
             const data = await LabTestService.getLabOrdersByPatient(patientId);
@@ -324,7 +347,9 @@ class labTestController {
     
     static async purchaseLabTest(req, res) {
         try {
-            const { patientId, totalPrice, cartId, orderId } = req.body;
+            const { totalPrice, cartId, orderId } = req.body;
+            // SEC-011: patientId is authorised, not trusted.
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
             const uniqueBookingId = Math.floor(10000 + Math.random() * 90000);
             const labOrderDetail = await LabOrder.findOne({ 
                 where: { id: orderId },
@@ -401,7 +426,9 @@ class labTestController {
 
     static async purchaseLabTestMobile(req, res) {
         try {
-            const { patientId, totalPrice, cartId, orderId } = req.body;
+            const { totalPrice, cartId, orderId } = req.body;
+            // SEC-011: patientId is authorised, not trusted.
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
             const uniqueBookingId = Math.floor(10000 + Math.random() * 90000);
             const labOrderDetail = await LabOrder.findOne({ 
                 where: { id: orderId },

@@ -21,9 +21,21 @@ class ChatService {
     }
 
 
-    static async chat(type, search,careCompanyIds) {    
+    /**
+     * SEC-006: careCompanyIds arrived as a raw `companyId` HTTP header and was
+     * interpolated into an IN (...) clause, giving unauthenticated SQL injection
+     * on GET /api/chat/searchList.
+     *
+     * SEC-009: it is now an array of integers derived from the caller's token.
+     */
+    static async chat(type, search, careCompanyIds) {
+        const companyIds = (Array.isArray(careCompanyIds) ? careCompanyIds : [careCompanyIds])
+            .map(Number)
+            .filter((n) => Number.isInteger(n) && n > 0);
+
         let list = [];
         if(type == 1){
+            if (companyIds.length === 0) return [];
             let query = `
                 SELECT 
                 p.id AS chatPartnerId,
@@ -36,14 +48,11 @@ class ChatService {
                 patientDetails pd ON p.id = pd.patientId
             WHERE 
                 (p.first_name LIKE :search OR p.last_name LIKE :search)
-                AND p.employer_id IN (${careCompanyIds})
+                AND p.employer_id IN (:companyIds)
             `;
 
-            const replacements = {};
-
-            if (search) {
-                replacements.search = `%${search}%`;
-            }
+            // Sequelize expands a bound array into a correctly escaped list.
+            const replacements = { companyIds, search: `%${search || ''}%` };
 
             list = await sequelizeDB1.query(query, {
                 type: QueryTypes.SELECT,
@@ -263,19 +272,35 @@ class ChatService {
 
     static async getChatList(userId, userType, searchKey = '') {
         try {
+            /**
+             * SEC-006: userId and userType were interpolated directly into
+             * sequelizeDB1.literal(), which emits raw SQL with no escaping. Both
+             * values came from req.query on an unauthenticated route and from an
+             * unauthenticated Socket.IO event, giving injection in the SELECT list.
+             *
+             * literal() has no parameter binding, so the values are coerced to
+             * integers first and the query is refused if they are not. Number
+             * validation is a sufficient guard here because an integer cannot
+             * carry SQL.
+             */
+            const uid = Number(userId);
+            const utype = Number(userType);
+            if (!Number.isInteger(uid) || !Number.isInteger(utype)) {
+                throw new Error('Invalid chat identifiers');
+            }
 
             // Fetch chat list with aggregation for unread messages
             const chatList = await Chat.findAll({
                 where: {
                     [Op.or]: [
-                        { senderId: userId, senderType: userType },
-                        { receiverId: userId, receiverType: userType }
+                        { senderId: uid, senderType: utype },
+                        { receiverId: uid, receiverType: utype }
                     ]
                 },
                 attributes: [
-                    [sequelizeDB1.literal(`IF(senderId = ${userId} AND senderType = ${userType}, receiverId, senderId)`), 'chatPartnerId'],
-                    [sequelizeDB1.literal(`IF(senderId = ${userId} AND senderType = ${userType}, receiverType, senderType)`), 'chatPartnerType'],
-                    [sequelizeDB1.literal(`SUM(IF(isRead = 0 AND receiverId = ${userId} AND receiverType = ${userType}, 1, 0))`), 'unreadMessages'],
+                    [sequelizeDB1.literal(`IF(senderId = ${uid} AND senderType = ${utype}, receiverId, senderId)`), 'chatPartnerId'],
+                    [sequelizeDB1.literal(`IF(senderId = ${uid} AND senderType = ${utype}, receiverType, senderType)`), 'chatPartnerType'],
+                    [sequelizeDB1.literal(`SUM(IF(isRead = 0 AND receiverId = ${uid} AND receiverType = ${utype}, 1, 0))`), 'unreadMessages'],
                 ],
                 group: ['chatPartnerId', 'chatPartnerType'],
                 raw: true

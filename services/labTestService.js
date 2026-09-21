@@ -1,4 +1,5 @@
 const { sequelizeDB1 } = require('../config/sequelize');
+const { toIdList } = require('../helpers/sqlSafe'); // SEC-006
 const { QueryTypes } = require('sequelize');
 const LabTestPrescription = require('../models/labTestPrescriptions');
 const LabCity = require('../models/labCity');
@@ -6,6 +7,8 @@ const LabOrder = require('../models/labOrder');
 const LabOrderDetails = require('../models/labOrderDetails');
 const Cart = require('../models/cart');
 const CartDetails = require('../models/cartDetail');
+const LabTest = require('../models/labTest');       // SEC-013: server-side pricing
+const LabPackage = require('../models/labPackage'); // SEC-013: server-side pricing
 const fs = require('fs').promises;    
 const path = require('path');
 const { logError } = require('../helpers/logErrorHelper');
@@ -1501,19 +1504,108 @@ ORDER BY
         return prescription;
     }
 
-    static async createLabOrder(data) {
-        const { orderDetails, ...orderData } = data;
+    /**
+     * SEC-013: prices are looked up from our own catalogue rather than taken from
+     * the request. type '1' is a lab test, type '2' is a package.
+     *
+     * An unknown or inactive reference is rejected rather than priced at zero.
+     */
+    static async priceOrderDetails(orderDetails, transaction) {
+        if (!Array.isArray(orderDetails) || orderDetails.length === 0) {
+            throw new Error('An order must contain at least one item');
+        }
+
+        const items = [];
+        let subtotal = 0;
+
+        for (const detail of orderDetails) {
+            const referenceId = Number(detail.referenceId);
+            if (!Number.isInteger(referenceId) || referenceId <= 0) {
+                throw new Error('Invalid order item reference');
+            }
+
+            let record;
+            let name;
+            if (String(detail.type) === '1') {
+                record = await LabTest.findByPk(referenceId, { transaction });
+                name = record && record.name;
+            } else if (String(detail.type) === '2') {
+                record = await LabPackage.findByPk(referenceId, { transaction });
+                name = record && record.packageName;
+            } else {
+                throw new Error('Invalid order item type');
+            }
+
+            if (!record) {
+                throw new Error('Unknown order item');
+            }
+
+            const price = Number(record.price) || 0;
+            subtotal += price;
+
+            items.push({
+                cartId: detail.cartId,
+                type: String(detail.type),
+                referenceId,
+                name,                       // from the catalogue, not the request
+                modeOfTest: detail.modeOfTest,
+                noOfTest: record.noOfTest || 1,
+                price,
+                discount: 0,
+                total: price,
+            });
+        }
+
+        return { items, subtotal, discount: 0, total: subtotal };
+    }
+
+    /**
+     * SEC-013: this spread the entire request body into LabOrder.create, so a
+     * client could set isPaid, paymentStatus, orderStatus, totalPrice and
+     * patientId. Prices and payment state are now computed server-side and the
+     * owning patient comes from the authenticated session, never the body.
+     *
+     * The `fields` option is a hard stop: attributes outside the list are ignored
+     * even if somehow present on the object.
+     */
+    static async createLabOrder(data, patientId) {
+        const { orderDetails } = data;
+
+        const CLIENT_FIELDS = ['bookingDate', 'bookingTime', 'bookingAddress', 'labId', 'labCityName', 'labBranchId'];
+        const SERVER_FIELDS = ['patientId', 'price', 'discountApplied', 'otherCharges', 'totalPrice', 'isPaid', 'orderStatus', 'paymentStatus', 'noOfTest'];
+
+        const orderData = {};
+        for (const key of CLIENT_FIELDS) {
+            if (data[key] !== undefined) orderData[key] = data[key];
+        }
+
         const transaction = await sequelizeDB1.transaction();
-        
+
         try {
-            const labOrder = await LabOrder.create(orderData, { transaction });
-            
-            const labOrderDetails = orderDetails.map(detail => ({
+            // Prices come from our own catalogue, not from the request.
+            const priced = await LabTestService.priceOrderDetails(orderDetails, transaction);
+
+            orderData.patientId = patientId;
+            orderData.price = priced.subtotal;
+            orderData.discountApplied = priced.discount;
+            orderData.otherCharges = 0;
+            orderData.totalPrice = priced.total;
+            orderData.noOfTest = priced.items.length;
+            orderData.isPaid = false;
+            orderData.orderStatus = 'pending';
+            orderData.paymentStatus = 'unpaid';
+
+            const labOrder = await LabOrder.create(orderData, {
+                fields: [...CLIENT_FIELDS, ...SERVER_FIELDS],
+                transaction,
+            });
+
+            const labOrderDetails = priced.items.map(detail => ({
                 ...detail,
                 labOrderId: labOrder.id,
-                patientId: orderData.patientId
+                patientId,
             }));
-            
+
             await LabOrderDetails.bulkCreate(labOrderDetails, { transaction });
             
             await transaction.commit();
@@ -2050,7 +2142,7 @@ WHERE
                     AND lo.isDeleted = false
                     AND lod.isActive = true
                     AND lod.isDeleted = false
-                    AND (p.companyId IN (${careCompanyIds}) OR p.employer_id IN (${careCompanyIds}))
+                    AND (p.companyId IN (${toIdList(careCompanyIds, 'company id')}) OR p.employer_id IN (${toIdList(careCompanyIds, 'company id')}))
             `;
            
             // Add filtering based on the selected time range
@@ -2136,7 +2228,7 @@ WHERE
                     lo.orderStatus = "pending"
                     AND lo.isActive = true
                     AND lo.isDeleted = false
-                    AND p.employer_id IN (${careCompanyIds})
+                    AND p.employer_id IN (${toIdList(careCompanyIds, 'company id')})
                 ORDER BY 
                     lo.bookingDate DESC
                 LIMIT 5
@@ -2444,7 +2536,7 @@ WHERE
             WHERE 
                 ltp.isActive = true 
                 AND ltp.isDeleted = false
-                AND p.employer_id IN (${careCompanyIds})
+                AND p.employer_id IN (${toIdList(careCompanyIds, 'company id')})
             ORDER BY 
                 ltp.createdAt DESC;
         `;

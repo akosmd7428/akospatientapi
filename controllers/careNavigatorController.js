@@ -50,7 +50,7 @@ class CareNavigatorController {
     static async getAppointments(req, res, next) {
         try {
             const { search, status, filter } = req.query;
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.user.companyIds; // SEC-009: from the signed token, not a header
            
             const appointments = await AppointmentService.getAppointmentsForCareNavigator(status, search, filter,careCompanyIds);
     
@@ -209,7 +209,7 @@ class CareNavigatorController {
     static async getAllPatients(req, res) {
         try {
             const { search, filter } = req.query;
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.user.companyIds; // SEC-009: from the signed token, not a header
             const userDetails = await PatientService.getAllPatients(search, filter,careCompanyIds);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.patientDetailsFetched, { userDetails });
         } catch (error) {
@@ -220,7 +220,7 @@ class CareNavigatorController {
     static async getMyPatients(req, res) {
         try {
             const { search, filter } = req.query;
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.user.companyIds; // SEC-009: from the signed token, not a header
             //Update count to zero 
             await CareNavigator.update(
                 { totalAssignedPatient: 0 },
@@ -236,7 +236,7 @@ class CareNavigatorController {
     static async getLabTests(req, res) {
         try {
             const { status, search, filter } = req.query;
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.user.companyIds; // SEC-009: from the signed token, not a header
             const labTests = await labTestService.getLabOrdersForCareNavigator(status, search, filter,careCompanyIds);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.patientDetailsFetched, { labTests });
         } catch (error) {
@@ -246,7 +246,7 @@ class CareNavigatorController {
 
     static async dashboard(req, res) {
         try {
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.user.companyIds; // SEC-009: from the signed token, not a header
             let totalAssignedPatient = 0;
             const appointments = await AppointmentService.getAppointmentsForDashboard(1,careCompanyIds);
             // Process each appointment asynchronously
@@ -291,7 +291,7 @@ class CareNavigatorController {
 
     static async prescriptions(req, res) {
         try {
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.user.companyIds; // SEC-009: from the signed token, not a header
             const prescriptions = await labTestService.getPrescriptionUploaded(careCompanyIds);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { prescriptions });
         } catch (error) {
@@ -459,7 +459,7 @@ class CareNavigatorController {
     static async getPreEmpLabTests(req, res) {
         try {
             const { status, search, filter,companyId } = req.query;
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.user.companyIds; // SEC-009: from the signed token, not a header
             const labTests = await PreEmployeePatientService.getPreEmploymentBookingDetails(companyId,status, search, filter,careCompanyIds);
             return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.patientDetailsFetched, { labTests });
         } catch (error) {

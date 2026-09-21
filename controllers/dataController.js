@@ -1,4 +1,5 @@
 const DataService = require('../services/dataService');
+const { assertCanAccessPatient } = require('../helpers/authorization'); // SEC-011
 const { STATUS_CODE } = require('../config/constant');
 const { messages } = require('../config/language');
 const CommonHelper = require('../helpers/commonHelper');
@@ -177,7 +178,8 @@ class DataController {
     
     static async getTalkToDoctorCallListApi(req, res){      
         try {
-            const { patientId, call_id } = req.body;
+            const { call_id } = req.body;
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id); // SEC-011
             const sql = `
                     SELECT patient.gender, 
                         patientDetails.age, 
@@ -272,7 +274,7 @@ class DataController {
 
     static async getOpentokRoomKeys(req, res) {
         try {
-            const { patientId } = req.query;
+            const patientId = await assertCanAccessPatient(req.user, req.query.patientId ?? req.user.id); // SEC-011
             const sql = `
                 SELECT id, session, token 
                 FROM connect_waiting_room 

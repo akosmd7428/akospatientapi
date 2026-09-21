@@ -1,4 +1,5 @@
 const AppointmentService = require('../services/appointmentService');
+const { assertCanAccessPatient } = require('../helpers/authorization'); // SEC-011
 const CommonHelper = require('../helpers/commonHelper');
 const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
@@ -8,7 +9,9 @@ const VitalMonitoringService = require('../services/vitalMonitoringService');
 class AppointmentController {
     static async bookAppointment(req, res, next) {
         try {
-            const { patientId, doctorId, date, time, is_paid} = req.body;
+            const { doctorId, date, time, is_paid } = req.body;
+            // SEC-011
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
             const appointmentData = {
                 patientId,
                 doctorId,
@@ -29,7 +32,9 @@ class AppointmentController {
 
     static async checkAppointmentStatus(req, res, next){
         try {
-            const { patientId, doctorId, date, time, is_paid} = req.body;            
+            const { doctorId, date, time, is_paid } = req.body;
+            // SEC-011
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);            
             const rn = await AppointmentService.checkAppointment(patientId, doctorId, date, time,is_paid);
             if(rn === 1){
                  return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.noAppointmentsFound, {  });
@@ -352,7 +357,8 @@ class AppointmentController {
 
     static async fetchCallDetails(req, res, next) {
         try {
-            const {patientId} = req.body;
+            // SEC-011
+            const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
             const data = await AppointmentService.fetchDoctorIds(patientId);
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { data });

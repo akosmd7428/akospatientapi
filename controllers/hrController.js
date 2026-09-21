@@ -69,7 +69,7 @@ class HrController {
     static async createPreEmployee(req, res){
        // console.log(req.body);      
         const { name, email, phone, gender, age, dateofbirth,city, state, zip_code,companyId,type,health_check_up_date } = req.body;
-        const companyId_header= req.header('companyId');
+        const companyId_header = req.user.companyIds; // SEC-009: from the signed token, not a header
         try {          
             const data = {
                 "name" : name,
@@ -104,7 +104,7 @@ class HrController {
     // get patient list
     static async getListOfPreEmployee(req, res){
         try {
-            const companyId_header= req.header('companyId');
+            const companyId_header = req.user.companyIds; // SEC-009: from the signed token, not a header
             const { companyId,status,search,from_date,to_date } = req.query;      
             const userDetails = await PreEmployeePatientService.getPreEmployeeList(companyId_header,status,search); 
             const preEnroll = await PreEmployeePatientService.getStatusWisePreEnroll(companyId_header,from_date,to_date);
@@ -127,7 +127,7 @@ class HrController {
     static async getCompanyHraAssesment(req, res){
         try {
             const { companyId,year,search } = req.query;          
-            const companyId_header= req.header('companyId');
+            const companyId_header = req.user.companyIds; // SEC-009: from the signed token, not a header
             const hraDetaails = await PreEmployeePatientService.getHraAssessment(companyId_header,year,search); 
             const pendingHra = await PreEmployeePatientService.getEmpPendingHra(companyId_header,year,search);
             const empMonthWise = await PreEmployeePatientService.getMonthWise(companyId_header,year,search);
@@ -146,7 +146,7 @@ class HrController {
     static async getEmpTookCall(req, res){
         try{
             const {companyId,from_date,to_date} = req.query;
-            const companyId_header= req.header('companyId');
+            const companyId_header = req.user.companyIds; // SEC-009: from the signed token, not a header
             const noOfEmpTakenCall = await PreEmployeePatientService.getNoOfEmployeeTakenCall(companyId_header,from_date,to_date);
             const speciallityWise = await PreEmployeePatientService.getEmpCountBySpeciality(companyId_header,from_date,to_date);
             const data = {
@@ -205,7 +205,7 @@ class HrController {
     static async getCardioRecords(req, res, next) {
         try {
             const { companyId,from_date, to_date } = req.query;    
-            const companyId_header= req.header('companyId');
+            const companyId_header = req.user.companyIds; // SEC-009: from the signed token, not a header
             const cardioResult = await PreEmployeePatientService.getPatientCountForCardio(companyId_header,from_date,to_date);
             const hyperResult = await PreEmployeePatientService.getPatientCountForHyper(companyId_header,from_date,to_date);
             const daibeticsResult = await PreEmployeePatientService.getPatientCountForDaibetics(companyId_header,from_date,to_date);
@@ -223,7 +223,7 @@ class HrController {
     static async getEmployeeDetails(req, res, next){
         try {
             const { companyId,search, filter,status } = req.query;    
-            const companyId_header= req.header('companyId');
+            const companyId_header = req.user.companyIds; // SEC-009: from the signed token, not a header
             const employeeNewlyAdded = await PreEmployeePatientService.getEmployeeNewAdded(companyId_header);
             const employeeDisabled = await PreEmployeePatientService.getEmployeeDisable(companyId_header);
             const employeeInSystem = await PreEmployeePatientService.getEmployeeInSystem(companyId_header);
@@ -248,7 +248,7 @@ class HrController {
     static async updateEmployeeStatus(req, res, next){
         try {
             const { companyId,patientId,status } = req.body;  
-            const companyId_header= req.header('companyId');
+            const companyId_header = req.user.companyIds; // SEC-009: from the signed token, not a header
             const employeest = await PreEmployeePatientService.enableDisableEmployeeStatus(companyId_header,patientId,status);
             const statusUpdate = {
                 statusUpdate : true
@@ -264,7 +264,7 @@ class HrController {
         // console.log(req.body);
          const { name, email, phone, gender, age, dateofbirth,city, state, zip_code,companyId } = req.body;
           try {  
-            const companyId_header= req.header('companyId');
+            const companyId_header = req.user.companyIds; // SEC-009: from the signed token, not a header
             // find patient email exist or not     
             const  password = 'Akosmd@123';
             //const hashedPassword = await bcrypt.hash(password, 10);
@@ -330,7 +330,7 @@ class HrController {
     static async engagementOfEmployee(req, res){
         try {
             const { companyId,from_date,to_date } = req.query;  
-            const companyId_header= req.header('companyId');
+            const companyId_header = req.user.companyIds; // SEC-009: from the signed token, not a header
             const totalemp = await PreEmployeePatientService.totalemp(companyId_header,from_date,to_date);
 
             const empCallTaken = await PreEmployeePatientService.takenpatientcall(companyId_header,from_date,to_date);

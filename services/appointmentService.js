@@ -1,5 +1,6 @@
 const Appointment = require('../models/appointmentModel');
 
+const { toIdList } = require('../helpers/sqlSafe'); // SEC-006
 const { sequelizeDB1 } = require('../config/sequelize');
 const { QueryTypes } = require('sequelize');
 const { APPOINTMENT_STATUS } = require('../config/secret');
@@ -131,7 +132,7 @@ class AppointmentService {
                     (a.date > :localDate) 
                     OR (a.date = :localDate AND a.time >= :localTime)
                 )` : ''}
-                AND p.employer_id IN (${careCompanyIds})
+                AND p.employer_id IN (${toIdList(careCompanyIds, 'company id')})
         `;              
         switch (filter) {
             case '1': // Last month
@@ -192,7 +193,7 @@ class AppointmentService {
             WHERE 
                 a.isActive = true 
                 AND a.status = :status
-                 AND p.employer_id IN (${careCompanyIds})
+                 AND p.employer_id IN (${toIdList(careCompanyIds, 'company id')})
             ORDER BY 
                 a.date DESC
             LIMIT 5;
