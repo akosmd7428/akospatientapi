@@ -14,6 +14,17 @@ const messages = {
     loginSuccess: 'User logged in successfully.',
     tokenInvalid: 'Invalid token',
     tokenNotFound : "Access denied. No token provided",
+    // SEC-001: authorization failures are 403 and must read differently from 401,
+    // so monitoring can tell "not logged in" from "not permitted".
+    forbidden: 'You do not have permission to perform this action',
+    // SEC-028: one generic message for every recovery outcome, so the response
+    // cannot be used to tell whether an address is registered or what role it holds.
+    otpSentIfRegistered: 'If this email is registered, an OTP has been sent',
+    invalidResetToken: 'Invalid or expired reset request',
+    invalidCredentials: 'Invalid email or password',
+    reasonRequired: 'A reason of at least 10 characters is required',
+    tooManyRequests: 'Too many attempts. Please try again later',
+    passwordPolicy: 'Password does not meet the minimum requirements',
     fullnameRequired: 'Fullname is required',
     invalidMobile: 'Invalid mobile number',
     invalidDateOfBirth: 'Invalid date of birth',

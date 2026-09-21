@@ -1,19 +1,28 @@
 const Joi = require('joi');
 
+// SEC-003: minimum length 12 per NIST SP 800-63B (length over composition rules).
 const registerSchema = Joi.object({
-  email: Joi.string().email().required(),
-  password: Joi.string().min(6).required(),
-  first_name: Joi.string().required(),
-  last_name: Joi.string().required(),
+  email: Joi.string().email().max(191).required(),
+  password: Joi.string().min(12).max(128).required(),
+  first_name: Joi.string().max(100).required(),
+  last_name: Joi.string().max(100).required(),
 });
 
 const loginSchema = Joi.object({
-  email: Joi.string().email().required(),
-  password: Joi.string().required(),
+  email: Joi.string().email().max(191).required(),
+  password: Joi.string().max(128).required(),
 });
 
+// SEC-017
+const refreshSchema = Joi.object({
+  refreshToken: Joi.string().hex().length(64).required(),
+});
+
+// SEC-012: impersonation requires a stated reason, which is written to the audit
+// trail before any token is issued.
 const loginPatientSchema = Joi.object({
-  patientId: Joi.number().required(),
+  patientId: Joi.number().integer().positive().required(),
+  reason: Joi.string().trim().min(10).max(500).required(),
 });
 
 const preEmpAddSchema = Joi.object({
@@ -32,8 +41,8 @@ const preEmpAddSchema = Joi.object({
   health_check_up_date: Joi.string().required(),
 });
 const externalSignupSchema = Joi.object({
-  employee_email: Joi.string().email().required(),
-  employee_password: Joi.string().min(6).required(),
+  employee_email: Joi.string().email().max(191).required(),
+  employee_password: Joi.string().min(12).max(128).required(),
   employee_name: Joi.string().required(),
   employee_mobile: Joi.string().required(),
   employer_id:Joi.number().integer().required(),
@@ -55,4 +64,4 @@ const ssoClientLoginSchema = Joi.object({
   'last-name': Joi.string().allow('', null).optional(),
 }).or('firstname', 'first_name');
 
-module.exports = { registerSchema, loginSchema, loginPatientSchema,preEmpAddSchema,externalSignupSchema,ssoClientLoginSchema };
+module.exports = { registerSchema, loginSchema, loginPatientSchema, preEmpAddSchema, externalSignupSchema, ssoClientLoginSchema, refreshSchema };

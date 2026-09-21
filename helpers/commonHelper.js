@@ -17,58 +17,19 @@ class CommonHelper {
         });  
     }
 
-    static sendSuccess(res, data, statusCode, message, additionalData = {}) { 
-        // additionalData = JSON.stringify(additionalData);
-         let dataJson = { success: true,
-             message,
-             data,
-             ...additionalData
-         }
-        // console.log("datajson",dataJson);
-         additionalData = JSON.stringify(dataJson);
-         let encryted = encryptData(additionalData)
-         let encryptedData = encryted.encryptedData;
-         let IV = encryted.IV;      
-         res.status(statusCode).json({
-                 encryptedData,
-                 IV               
-             });
-     }
-     static sendError(res, statusCode, message, errors = []) {
-
-        let dataJson = { 
-            success: false,
-            message,
-            errors
-        }
-
-        let additionalData = JSON.stringify(dataJson);
-        let encryted = encryptData(additionalData)
-        let encryptedData = encryted.encryptedData;
-        let IV = encryted.IV;      
-        res.status(statusCode).json({
-                encryptedData,
-                IV               
-            });
-
-        // res.status(statusCode).json({
-        //     success: false,
-        //     message,
-        //     errors
-        // });
+    // SEC-004: encryptData now returns a per-message IV and a GCM auth tag.
+    // All three fields must reach the client or it cannot decrypt.
+    static sendSuccess(res, data, statusCode, message, additionalData = {}) {
+        const payload = JSON.stringify({ success: true, message, data, ...additionalData });
+        const { encryptedData, IV, tag } = encryptData(payload);
+        res.status(statusCode).json({ encryptedData, IV, tag });
     }
 
-    static sendEncryptData(res, data, statusCode, message, additionalData = {}) {  
-        //console.log(additionalData);
-        let encryted = encryptData(JSON.stringify(additionalData));
-        //console.log(encryted);
-        res.status(statusCode).json({
-             success: true,
-             message,
-             data,
-             encryted
-         });  
-     }
+    static sendError(res, statusCode, message, errors = []) {
+        const payload = JSON.stringify({ success: false, message, errors });
+        const { encryptedData, IV, tag } = encryptData(payload);
+        res.status(statusCode).json({ encryptedData, IV, tag });
+    }
 
      static generateUuidV4() {
             const crypto = require('crypto');
@@ -92,31 +53,25 @@ class CommonHelper {
             );
     }
 
+    // SEC-017: previously referenced an undefined `jwt` and signed with the API's
+    // own JWT_SECRET, so an email link was accepted as an API session. It now uses
+    // the dedicated email-token issuer with its own secret and a `typ` claim.
     static generateVerificationLink(userId, baseUrl) {
-        // Create token valid for 1 day
-        const token = jwt.sign(
-            { userId },
-            process.env.JWT_SECRET,
-            { expiresIn: "1d" } // expires in 1 day
-        );
-        // Construct verification URL
-        const verificationLink = `${baseUrl}/verify-email?token=${token}`;
-        return verificationLink;
+        const { issueEmailToken } = require('./tokenHelper');
+        const token = issueEmailToken({ userId });
+        return `${baseUrl}/verify-email?token=${encodeURIComponent(token)}`;
     }
 
-    // resolve the caller ip, the api is served behind a proxy so x-forwarded-for wins
+    /**
+     * SEC-020: the previous implementation read x-forwarded-for directly and took
+     * the LEFTMOST entry, which is the attacker-controlled position. That made the
+     * SSO IP allow-list bypassable with one header.
+     *
+     * req.ip applies the app's `trust proxy` setting, which is configured in
+     * index.js to the exact number of proxies in front of us.
+     */
     static getClientIp(req) {
-        const forwarded = req.headers['x-forwarded-for'];
-        let ip = '';
-
-        if (forwarded) {
-            ip = forwarded.split(',')[0].trim();
-        } else {
-            ip = req.headers['x-real-ip'] || req.ip || (req.connection && req.connection.remoteAddress) || '';
-        }
-        // strip the ipv4 mapped ipv6 prefix (::ffff:127.0.0.1) and the ipv6 loopback
-        ip = String(ip).replace(/^::ffff:/i, '');
-
+        const ip = String(req.ip || '').replace(/^::ffff:/i, '');
         return ip === '::1' ? '127.0.0.1' : ip;
     }
 
@@ -133,8 +88,11 @@ class CommonHelper {
         if (allowedIps.length === 0) {
             return false;
         }
+        // SEC-020: a '*' entry previously disabled the control silently. An
+        // allow-list that allows everything is a misconfiguration, not a policy.
         if (allowedIps.includes('*')) {
-            return true;
+            console.error('[security] ip allow-list contains a wildcard entry; refusing to honour it');
+            return false;
         }
         return allowedIps.includes(ip);
     }
@@ -148,7 +106,7 @@ class CommonHelper {
         }
         const valueBuffer = Buffer.from(value);
         const expectedBuffer = Buffer.from(expected);
-        console.log(valueBuffer);
+        // SEC-016: this previously logged the secret it was given, on every call.
         if (valueBuffer.length !== expectedBuffer.length) {
             return false;
         }

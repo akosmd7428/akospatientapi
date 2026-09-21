@@ -7,12 +7,12 @@ const CommonHelper = require('../helpers/commonHelper');
 const PatientService = require('../services/patientService');
 const { logError } = require('../helpers/logErrorHelper');
 const errorHandler = require('../middleware/errorHandler');
-const { encryptData,decryptData } = require('../config/encryption');
 const DoctorService = require('../services/doctorService');
 const crypto = require('crypto');
-const { JWT_SECRET, PATIENT_FRONTEND_URL } = require('../config/secret');
+const { PATIENT_FRONTEND_URL } = require('../config/secret');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
-const jwt = require('jsonwebtoken');
+const { hashPassword } = require('../helpers/passwordHelper');
+const { issueEmailToken, verifyEmailToken } = require('../helpers/tokenHelper');
 
 class AuthController {
   static async register(req, res, next) {
@@ -29,11 +29,18 @@ class AuthController {
   static async login(req, res, next) {
     try {     
       const { email, password } = req.body;
-      console.log(req.body);
+      // SEC-016: this previously logged req.body here. validateDataEncryption has
+      // already decrypted it by this point, so it printed the plaintext email and
+      // password of every login attempt to the process log.
       const getRole = req.header("role") || null;
       let userDetails;
-      //Login as Patient after first time
-      let { token, user, role } = await AuthService.login({ email, password, getRole });
+      // The role selects which table to check. It is not an authorization
+      // decision - the password must still match - and the issued token's role
+      // comes from the server, not from this header (SEC-001).
+      let { token, refreshToken, user, role } = await AuthService.login(
+        { email, password, getRole },
+        CommonHelper.getClientIp(req)
+      );
     
       
       if(getRole){
@@ -44,7 +51,7 @@ class AuthController {
                 CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided email.");
             }
             userDetails.role = "patient";
-            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails });       
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, refreshToken, userDetails });       
           }
         }
         if(getRole == "careNavigator"){
@@ -55,7 +62,7 @@ class AuthController {
               CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No user found with the provided email.");
             }
             userDetails.role = "careNavigator";
-            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails });       
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, refreshToken, userDetails });       
           }    
         }
         if(getRole == "hr"){
@@ -66,7 +73,7 @@ class AuthController {
                CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No user found with the provided email.");
              }
              userDetails.role = "hr";
-             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails });       
+             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, refreshToken, userDetails });       
            }    
          }
       }
@@ -77,61 +84,40 @@ class AuthController {
     }
   }
 
-  static async encryptDataSample(req, res, next) {
-    try { 
-      //let EntData = encryptData(`{ "email": "nikhils@gmail.com","password": "Nikhil@akos"}`);
-     // let data = `{ "email": "nikhils@gmail.com","password": "Nikhil@akos"}`;
-      let data = req.body;
-     // console.log(data);
-     // let EntData = encryptData(data);
-     // console.log(EntData);
-     let EntData = data;
-      return CommonHelper.sendEncryptData(res, true, STATUS_CODE.HTTP_201_CREATED, messages.registrationSuccess, { EntData });
-    } catch (error) {
-      errorHandler(error, req, res, next);
-      return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
-    }
+  /**
+   * SEC-017: exchange a refresh token for a new access token. Refresh tokens are
+   * single use; replaying a revoked one is treated as a compromised family and
+   * terminates every session for that user.
+   */
+  static async refresh(req, res) {
+    const result = await AuthService.refresh(
+      req.body.refreshToken,
+      CommonHelper.getClientIp(req)
+    );
+    return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, result);
   }
 
-  static async decryptDataSample(req, res, next) {
-    try {    
-      const { encryptedData,IV } = req.body;   
-      //console.log(encryptedData,IV,"encrypted data")
-      let result = decryptData(encryptedData,IV);    
-      result = JSON.parse(result);  
-      //console.log(result);
-      let msgg = 'Decrypt success';
-      return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.msgg, { result });
-    } catch (error) {
-      errorHandler(error, req, res, next);
-      return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
-    }
+  /** SEC-017: there was no logout at all, so a session could not be terminated. */
+  static async logout(req, res) {
+    await AuthService.logout(req.user);
+    return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'Logged out');
   }
 
-  static async getQueryStr(req, res, next) {
-    try {
-      
-      if (Object.keys(req.params).length != 0) {
-        console.log('The object is empty');
-      } else {
-        console.log('The object is not empty');
-      }
-      if(typeof req.body === undefined){
-        console.log(req.body.length);
-      }else{
-        console.log("mm");
-      } 
-    
-      const { encryptedData,IV } = req.body;   
-      let result = decryptData(encryptedData,IV);    
-      result = JSON.parse(result);    
-      let msgg = 'Decrypt success';
-      return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.msgg, { result });
-    } catch (error) {
-      errorHandler(error, req, res, next);
-      return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
-    }
+  static async logoutAll(req, res) {
+    await AuthService.logoutAll(req.user);
+    return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'Logged out of all sessions');
   }
+
+  // SEC-005: encryptDataSample, decryptDataSample and getQueryStr were removed.
+  // They were unauthenticated and took attacker-supplied input: two decrypted
+  // arbitrary ciphertext with the server's key and returned the plaintext, the
+  // third encrypted arbitrary data with it. Together they meant the payload
+  // cipher offered no protection even with a secret key, because the server
+  // would encrypt and decrypt on demand - which is also why rotating the key in
+  // SEC-004 would have achieved nothing while they existed.
+  //
+  // If a tool for crafting payloads is needed, it belongs outside the deployed
+  // application, run locally against a development key.
 
   static async ssologin(req, res, next) {
     try {     
@@ -153,7 +139,7 @@ class AuthController {
           const company_id = companyDetails;
           const patientDEtails = await PatientService.createOrCheckPatient(employee_name,employee_email,employee_mobile,company_id,uuid);
         }
-        console.log(companyDetails);
+        // SEC-016: removed a console.log of the company row.
       }
      // return false;
       const getRole = req.header("role") || null;
@@ -170,7 +156,7 @@ class AuthController {
                 CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided email.");
             }
             userDetails.role = "patient";
-            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails });       
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, refreshToken, userDetails });       
           }
         }    
       }
@@ -202,7 +188,8 @@ class AuthController {
       const first_name = req.body.firstname || req.body.first_name;
       const last_name = req.body.last_name || req.body.lastname || req.body['last-name'] || '';
       const clientIp = CommonHelper.getClientIp(req);
-      console.log(client_secret);
+      // SEC-016: removed a console.log of client_secret, which printed the SSO
+      // client secret in cleartext on every authentication attempt.
       let company;
 
       if (parent_client_id) {
@@ -233,7 +220,8 @@ class AuthController {
           return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_client);
         }
         company = companyDetails[0];
-        console.log(company);
+        // SEC-016: removed a console.log of the full company row, which included
+        // client_secret and api_ip_whitelist.
         const clientCheck = AuthController.validateSsoClient(company, client_secret, clientIp);
         if (!clientCheck.valid) {
           return CommonHelper.sendErrorUnencrypt(res, clientCheck.statusCode, clientCheck.message);
@@ -254,7 +242,8 @@ class AuthController {
       if (!patient) {
         const uuid = CommonHelper.generateUuidV4();
         // the client owns the authentication, there is no password to log in with so a random one is stored
-        const hash_password = crypto.createHash('md5').update(CommonHelper.generateUuidV4()).digest('hex');
+        // SEC-003: bcrypt, not MD5. The value is random and never used to log in.
+        const hash_password = await hashPassword(crypto.randomBytes(32).toString('hex'));
         const createdPatientId = await PatientService.createSsoPatient(first_name, last_name, email, mobile || '', company_id, uuid, hash_password);
 
         if (!createdPatientId) {
@@ -281,7 +270,7 @@ class AuthController {
       }
       userDetails.role = "patient";
 
-      return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails });
+      return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, refreshToken, userDetails });
     } catch (error) {
       return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
     }
@@ -291,11 +280,9 @@ class AuthController {
 
        try { 
         const {employer_id,company_name,employee_name,employee_email,employee_mobile,employee_password,company_address} = req.body;
-        const uuid = CommonHelper.generateUuidV4();  
-        // Input string to hash
-        const input = employee_password;
-        // Create MD5 hash
-        const hash_password = crypto.createHash('md5').update(input).digest('hex');        
+        const uuid = CommonHelper.generateUuidV4();
+        // SEC-003: bcrypt replaces unsalted MD5.
+        const hash_password = await hashPassword(employee_password);
 
         if(employer_id){
         //check company and create the company
@@ -334,16 +321,14 @@ class AuthController {
               if(patientDEtails == 1){
                   return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.user_signup);
               }
-              const token = jwt.sign(
-                { patientDEtails },
-                  JWT_SECRET,
-                { expiresIn: "1d" } // expires in 1 day
-              );
+              // SEC-017: previously signed with the API's own JWT_SECRET and no
+              // token type, so an email-verification link was accepted by the
+              // authentication middleware as an API session. It now uses a
+              // separate secret, a `typ` claim and a 1-hour expiry.
+              const token = issueEmailToken({ patientDEtails });
 
-              // update toen to the valid
-             
           // Construct verification URL
-              const verificationLink = `${PATIENT_FRONTEND_URL}/verify-email?token=${token}`; 
+              const verificationLink = `${PATIENT_FRONTEND_URL}/verify-email?token=${encodeURIComponent(token)}`;
 
               const emailContent = `
               <h2>Verify Your Email Address</h2>
@@ -380,7 +365,9 @@ class AuthController {
   static async verifyEmailPatient(req, res, next){
     try {     
       const token = req.query.token;
-      const decoded = jwt.verify(token,JWT_SECRET);       
+      // SEC-017: verifies against the email-token secret with the type checked,
+      // so an API access token cannot be replayed here either.
+      const decoded = verifyEmailToken(token);
       if(decoded.patientDEtails){
         const patientd = decoded.patientDEtails;
         const patientDetailsData = await PatientService.getTempPatientDetails(patientd);
@@ -437,11 +424,9 @@ class AuthController {
   static async externalSignup(req, res, next){
      try { 
         const {employer_id,company_name,employee_name,employee_email,employee_mobile,employee_password,company_address} = req.body;
-        const uuid = CommonHelper.generateUuidV4();  
-        // Input string to hash
-        const input = employee_password;
-      // Create MD5 hash
-      const hash_password = crypto.createHash('md5').update(input).digest('hex');
+        const uuid = CommonHelper.generateUuidV4();
+        // SEC-003: bcrypt replaces unsalted MD5.
+        const hash_password = await hashPassword(employee_password);
 
      // const verificationLink = CommonHelper.generateVerificationLink();
    
