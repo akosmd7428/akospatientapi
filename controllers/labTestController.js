@@ -1,4 +1,5 @@
 const LabTestService = require('../services/labTestService');
+const { randomDigits } = require('../helpers/secureRandom'); // SEC-018
 const CommonHelper = require('../helpers/commonHelper');
 const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
@@ -350,7 +351,7 @@ class labTestController {
             const { totalPrice, cartId, orderId } = req.body;
             // SEC-011: patientId is authorised, not trusted.
             const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
-            const uniqueBookingId = Math.floor(10000 + Math.random() * 90000);
+            const uniqueBookingId = Number(randomDigits(5));
             const labOrderDetail = await LabOrder.findOne({ 
                 where: { id: orderId },
                 attributes: ['uniqueBookingId', 'paymentStatus', 'orderStatus'],
@@ -429,7 +430,7 @@ class labTestController {
             const { totalPrice, cartId, orderId } = req.body;
             // SEC-011: patientId is authorised, not trusted.
             const patientId = await assertCanAccessPatient(req.user, req.body.patientId ?? req.user.id);
-            const uniqueBookingId = Math.floor(10000 + Math.random() * 90000);
+            const uniqueBookingId = Number(randomDigits(5));
             const labOrderDetail = await LabOrder.findOne({ 
                 where: { id: orderId },
                 attributes: ['uniqueBookingId', 'paymentStatus', 'orderStatus'],

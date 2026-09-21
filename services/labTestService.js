@@ -1,4 +1,5 @@
 const { sequelizeDB1 } = require('../config/sequelize');
+const { randomDigits } = require('../helpers/secureRandom'); // SEC-018
 const { toIdList } = require('../helpers/sqlSafe'); // SEC-006
 const { QueryTypes } = require('sequelize');
 const LabTestPrescription = require('../models/labTestPrescriptions');
@@ -2958,7 +2959,7 @@ WHERE
 
             const amountInPaise = totalPrice*100;
 
-            const randomSixDigit = Math.floor(10000000 + Math.random() * 900000);
+            const randomSixDigit = Number(randomDigits(8));
 
             const orderOptions = {
                 amount: amountInPaise, // Amount in paise

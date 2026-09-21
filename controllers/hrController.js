@@ -1,4 +1,5 @@
 const CommonHelper = require('../helpers/commonHelper');
+const { randomDigits } = require('../helpers/secureRandom'); // SEC-018
 const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
 const CareNavigator = require('../models/careNavigatorModel');
@@ -21,6 +22,7 @@ const { v4: uuidv4 } = require('uuid');
 const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const { hashPassword } = require('../helpers/passwordHelper'); // SEC-003
 class HrController {
 
     static async getProfileDetails(req, res) {
@@ -265,14 +267,20 @@ class HrController {
          const { name, email, phone, gender, age, dateofbirth,city, state, zip_code,companyId } = req.body;
           try {  
             const companyId_header = req.user.companyIds; // SEC-009: from the signed token, not a header
-            // find patient email exist or not     
-            const  password = 'Akosmd@123';
-            //const hashedPassword = await bcrypt.hash(password, 10);
-            const hashedPassword = crypto.createHash('md5').update(password).digest('hex');
+            /**
+             * SEC-035: every HR-created employee account used the same hardcoded
+             * password, stored as unsalted MD5. Because the hash was unsalted it
+             * was a single constant, so one query over the database named every
+             * account still using it.
+             *
+             * SEC-003: no usable password is set at all now. The account cannot
+             * authenticate until the employee activates it through the password
+             * reset flow, which requires control of the mailbox.
+             */
+            const hashedPassword = await hashPassword(crypto.randomBytes(32).toString('hex'));
             let patientEmail = email;
-            console.log(email);
+            // SEC-016: removed console.log of the email and the full patient row.
             const patientEmailExt = await Patient.findOne({ where: { email } });
-            console.log(patientEmailExt);
             if(patientEmailExt != null){ 
                 CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.serverError, 'Email is already registered.');
             }else{
@@ -299,7 +307,7 @@ class HrController {
                     return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.preEmpCreateErr);
                  }else{
                     const empId = empCreated.id;
-                    const randNumber = Math.floor(100000 + Math.random() * 900000);
+                    const randNumber = Number(randomDigits(6));
                     const connectPatientData = {
                         "connectionType" : 1,
                         "first_name" : name,
@@ -492,7 +500,7 @@ class HrController {
     static async uploadPrescription(req, res, next) {
         try {
         const { patientId, doctorId, appointmentId, prescriptionURL } = req.body;
-        const prescriptionUniqueId = Math.floor(10000 + Math.random() * 90000);
+        const prescriptionUniqueId = Number(randomDigits(5));
         //write code to upload prescription
         if(patientId && doctorId && appointmentId && prescriptionURL){
 

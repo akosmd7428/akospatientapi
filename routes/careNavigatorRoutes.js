@@ -23,7 +23,10 @@ router.get('/getPackages',requireAuth(ROLES.CARE_NAVIGATOR), validateDataEncrypt
 router.post('/updateAppointment',requireAuth(ROLES.CARE_NAVIGATOR), validateDataEncryption(), CareNavigatorController.updateAppointment);
 router.post('/send-email',requireAuth(ROLES.CARE_NAVIGATOR), validateDataEncryption(), CareNavigatorController.sendEmail);
 router.get('/orders/:orderId',requireAuth(ROLES.CARE_NAVIGATOR), validateDataEncryption(), CareNavigatorController.getLabOrdersByPatient);
-router.post('/login',requireAuth(ROLES.CARE_NAVIGATOR), validateDataEncryption(), validateSchema(loginPatientSchema), CareNavigatorController.login);
+// SEC-012: renamed from /login, which implied authentication and hid what it did.
+// Requires a stated reason, checks the patient is in the navigator's own company,
+// writes an audit record, and issues a 15-minute token marked as an impersonation.
+router.post('/impersonate',requireAuth(ROLES.CARE_NAVIGATOR), validateDataEncryption(), validateSchema(loginPatientSchema), CareNavigatorController.impersonatePatient);
 router.post('/uploadPrescription',requireAuth(ROLES.CARE_NAVIGATOR), validateDataEncryption(), CareNavigatorController.uploadPrescription);
 
 router.get('/preemployeelabTests',requireAuth(ROLES.CARE_NAVIGATOR), validateDataEncryption(), CareNavigatorController.getPreEmpLabTests);

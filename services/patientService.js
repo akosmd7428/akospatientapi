@@ -1,4 +1,5 @@
 const PatientDetail = require('../models/patientDetailModel');
+const { randomDigits } = require('../helpers/secureRandom'); // SEC-018
 const { toIdList } = require('../helpers/sqlSafe'); // SEC-006
 const PatientFamilyHistory = require('../models/patientFamilyHistoryModel');
 const { sequelizeDB1 } = require('../models');
@@ -621,7 +622,7 @@ class PatientService {
                     prescription = await PatientPrescriptionDetails.create(prescriptionDetail);
                 }
                 //Generate prescriptionUniqueId
-                const prescriptionUniqueId = Math.floor(10000 + Math.random() * 90000);
+                const prescriptionUniqueId = Number(randomDigits(5));
                 await PatientPrescriptionDetails.update(
                     { prescriptionUniqueId: prescriptionUniqueId },
                     {
@@ -634,7 +635,7 @@ class PatientService {
                 // When appointmentId is not available
                 prescription = await PatientPrescriptionDetails.create(prescriptionDetail);
                 //Generate prescriptionUniqueId
-                const prescriptionUniqueId = Math.floor(10000 + Math.random() * 90000);
+                const prescriptionUniqueId = Number(randomDigits(5));
                 await PatientPrescriptionDetails.update(
                     { prescriptionUniqueId: prescriptionUniqueId },
                     {
@@ -1221,7 +1222,7 @@ class PatientService {
             return 1;
         }else{
 
-            const uniqueId = Math.floor(100000 + Math.random() * 900000).toString();
+            const uniqueId = Number(randomDigits(6)).toString();
 
             if(befor_email_valid == 0){
                         const insertQuery = `INSERT INTO 
@@ -1393,7 +1394,7 @@ class PatientService {
     }
     // create patient for the sso client login (no email verification, identity is trusted by the client)
     static async createSsoPatient(first_name, last_name, email, mobile, company_id, uuid, hash_password){
-        const uniqueId = Math.floor(100000 + Math.random() * 900000).toString();
+        const uniqueId = Number(randomDigits(6)).toString();
         const connectedUser = await ConnectedCompaniesPatient.findOne({ where: { patientEmail : email, companyId : company_id } });
 
         if(!connectedUser){

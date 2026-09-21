@@ -1,4 +1,5 @@
 const { sequelizeDB1 } = require('../config/sequelize');
+const { randomDigits } = require('../helpers/secureRandom'); // SEC-018
 const { QueryTypes, Op } = require('sequelize');
 const crypto = require('crypto');
 const WorksmanCompanyList = require('../models/worksmanCompanyList');
@@ -46,8 +47,12 @@ const MIGRATION_COLUMNS = [
 let migrationColumnsEnsured = false;
 
 class MigrationService {
-    static hashPassword(plain = DEFAULT_PASSWORD) {
-        return crypto.createHash('md5').update(plain).digest('hex');
+    // SEC-003 / SEC-035: was unsalted MD5 over a shared DEFAULT_PASSWORD, so every
+    // migrated account carried the same recoverable hash. Migrated accounts now
+    // get an unusable random credential and must activate via password reset.
+    static async hashPassword(plain) {
+        const { hashPassword } = require('../helpers/passwordHelper');
+        return hashPassword(plain || crypto.randomBytes(32).toString('hex'));
     }
 
     static splitName(fullName = '') {
@@ -143,7 +148,7 @@ class MigrationService {
 
     static async generateUniqueEmployerId(transaction) {
         for (let attempt = 0; attempt < 10; attempt++) {
-            const candidate = String(Math.floor(100000 + Math.random() * 900000));
+            const candidate = String(Number(randomDigits(6)));
             const exists = await WorksmanCompanyList.findOne({
                 where: { employer_id: candidate },
                 transaction
@@ -190,14 +195,14 @@ class MigrationService {
             first_name,
             last_name,
             email,
-            password: this.hashPassword(),
+            password: await this.hashPassword(),
             dateofbirth: employee.emp_dob || null,
             phone: employee.emp_mobile ? String(employee.emp_mobile) : null,
             companyId,
             employer_id: companyId,
             uniquePatientId: employee.emp_ID
                 ? String(employee.emp_ID)
-                : String(Math.floor(100000 + Math.random() * 900000)),
+                : String(Number(randomDigits(6))),
             isFirstLogin: 0,
             isProfileCompleted: 0,
             is_migrated: true
@@ -222,7 +227,7 @@ class MigrationService {
             patientEmail: patient.email,
             status: '1',
             isActive: true,
-            password: this.hashPassword()
+            password: await this.hashPassword()
         }, { transaction });
     }
 

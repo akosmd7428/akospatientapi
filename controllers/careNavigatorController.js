@@ -1,4 +1,8 @@
 const CommonHelper = require('../helpers/commonHelper');
+const { randomDigits } = require('../helpers/secureRandom'); // SEC-018
+const { assertCanAccessPatient } = require('../helpers/authorization'); // SEC-011
+const { ForbiddenError } = require('../helpers/errors');
+const ImpersonationLog = require('../models/impersonationLog'); // SEC-012
 const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
 const CareNavigator = require('../models/careNavigatorModel');
@@ -375,35 +379,63 @@ class CareNavigatorController {
         }
     }
 
-    static async login(req, res, next) {
-        try {
-          const { patientId } = req.body;
-          let userDetails;
-          //Login as Patient after first time
-          const patient = await Patient.findOne( { where : { id : patientId } } );
-          if(patient) {
-            let { token } = await AuthService.patientLogin(patient);
-            userDetails = await PatientService.getPatientDetailsByEmail(patient.email, patient);
-            if (userDetails.length === 0) {
-                CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided patient Id.");
-            }
-            userDetails.currentRole = "patient";
-            const loggedBy = "careNavigator";
-            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails, loggedBy });          
-          }else{
-            throw new Error("Invalid Patient Id");
-          }
-        } catch (error) {
-          console.error(error);
-          return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
+    /**
+     * SEC-012: this minted a full 1-day patient JWT for ANY patientId in the body,
+     * with no check that the navigator was entitled to that patient, no audit
+     * record, and a token indistinguishable from a real patient login. Combined
+     * with the broken role middleware (SEC-001), any authenticated user could
+     * iterate patientId and collect a session for every patient on the platform.
+     *
+     * Rebuilt with the four controls a support-impersonation feature needs:
+     * a tenant check, a mandatory reason, an audit row written before the token
+     * is issued, and an `act` claim plus narrow scope and short expiry so the
+     * session is distinguishable and restricted downstream.
+     */
+    static async impersonatePatient(req, res) {
+        const actor = req.user;
+        const reason = String(req.body.reason || '').trim();
+
+        // Authorises the patient against the actor's own company scope, and
+        // returns the same 403 whether the patient is missing or out of scope.
+        const patientId = await assertCanAccessPatient(actor, req.body.patientId);
+
+        const patient = await Patient.findByPk(patientId);
+        if (!patient) {
+            throw new ForbiddenError();
         }
+
+        // Written first: if the audit insert fails, no token is minted.
+        const audit = await ImpersonationLog.create({
+            actorId: actor.id,
+            actorRole: actor.role,
+            subjectId: patient.id,
+            reason,
+            ip: CommonHelper.getClientIp(req),
+            startedAt: new Date(),
+        });
+
+        const { token } = await AuthService.patientLogin(patient, {
+            act: { sub: actor.id, role: actor.role, log: audit.id },
+            scope: ['read:record', 'write:notes'],
+            expiresIn: '15m',
+        });
+
+        const userDetails = await PatientService.getPatientDetailsByEmail(patient.email, patient);
+        userDetails.currentRole = 'patient';
+
+        return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, {
+            token,
+            userDetails,
+            loggedBy: actor.role,
+            impersonation: true,
+        });
     }
 
     
     static async uploadPrescription(req, res, next) {
         try {
         const { patientId, doctorId, appointmentId, prescriptionURL } = req.body;
-        const prescriptionUniqueId = Math.floor(10000 + Math.random() * 90000);
+        const prescriptionUniqueId = Number(randomDigits(5));
         //write code to upload prescription
         if(patientId && doctorId && appointmentId && prescriptionURL){
 

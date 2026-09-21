@@ -37,7 +37,12 @@ const Logs = sequelizeDB1.define('logs', {
   }
 }, {
   tableName: 'logs',
-  timestamps: false
+  // SEC-016 / SEC-024: `timestamps: false` meant there was no createdAt, so no
+  // retention or purge policy could be implemented and the table - which held
+  // raw request bodies - grew without bound. createdAt is required for the
+  // purge job in helpers/logRetention.js.
+  timestamps: true,
+  updatedAt: false,
 });
 
 module.exports = Logs;
