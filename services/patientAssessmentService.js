@@ -258,7 +258,6 @@ class PatientAssessmentService {
                     'Content-Type': 'application/json',
                 },
             });
-            console.log(response,'response================');
             return response;
         } catch (error) {
             console.error('Error:', error.message);

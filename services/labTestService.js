@@ -253,7 +253,6 @@ ORDER BY
                 throw new Error("This item already added into cart");
             }
         }else{ //Cart not exists
-            console.log("cart mode",mode);
             if(mode === 2){            
                 const cartDetail = await Cart.create( { patientId} );
                 if(cartDetail){
@@ -2381,7 +2380,6 @@ WHERE
 
             // Create order in Razorpay
             const order = await razorpayInstance.orders.create(orderOptions);
-            console.log(order,'order====');
 
             const patientDetails = await Patient.findOne({where: {id : patientId}});
          
@@ -2467,7 +2465,6 @@ WHERE
 
             // Create order in Razorpay
             const order = await razorpayInstance.orders.create(orderOptions);
-            console.log(order,'order====');
 
             const patientDetails = await Patient.findOne({where: {id : patientId}});
          
@@ -2599,7 +2596,6 @@ WHERE
           };
        // console.log(REDCLIFF_LAB_URL);
        // const alocData = await axios.get(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-location-2-eloc?place_query=mewat hariyana", payload);
-        console.log(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-loc-2-eloc/?eloc="+aloc);
         const latLongData = await axios.get(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-loc-2-eloc/?eloc="+aloc, payload);        
         return latLongData;
     }
@@ -2615,7 +2611,6 @@ WHERE
           };
        // console.log(REDCLIFF_LAB_URL);
        // const alocData = await axios.get(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-location-2-eloc?place_query=mewat hariyana", payload);
-        console.log(REDCLIFF_LAB_URL+"api/booking/v2/get-time-slot-list/?collection_date="+collection_date+"&latitude="+lat+"&longitude="+long);
         const collectionSlot = await axios.get(REDCLIFF_LAB_URL+"api/booking/v2/get-time-slot-list/?collection_date="+collection_date+"&latitude="+lat+"&longitude="+long, payload); 
         return collectionSlot;
     }
@@ -2725,7 +2720,6 @@ WHERE
                     replacements: { orderId },
                     type: QueryTypes.SELECT
                 }); 
-                console.log(codeRs);
                 // Create a Date object
                 const date = new Date(rs.createdAt);
                 // Format the date to YYYY-MM-DD
@@ -2758,13 +2752,10 @@ WHERE
                     },
                 });
                 const response = response11.data;  
-                console.log(response);          
                 if(response.status == 'success'){
-                    console.log("true");                   
                     const booking_id = response.booking_id;
                     const booking_date = response.booking_date;
                     const collection_date = response.collection_date;
-                    console.log(booking_id,"booking id ====");
                     // update order table by lab booing id 
                     const orderLabQuesry = `
                     update labOrders set booking_id = :booking_id
@@ -2896,7 +2887,6 @@ WHERE
                     "pincode" : patientAddressInfo.zip_code,
                     "additional_member": []            
                 };
-                console.log(data);
                   const response = await axios.post(REDCLIFF_LAB_URL+"api/external/v2/center-create-booking/", data, {
                         headers: {
                             'Content-Type': 'application/json',
@@ -2904,7 +2894,6 @@ WHERE
                            'Cookie': REDCLIFF_COOKIE
                         },
                     });
-                    console.log(response,'response================');
                     return response;
 
             }
@@ -2975,7 +2964,6 @@ WHERE
 
             // Create order in Razorpay
             const order = await razorpayInstance.orders.create(orderOptions);
-            console.log(order,'order====');
 
             const patientDetails = await Patient.findOne({where: {id : patientId}});
          
@@ -3100,7 +3088,6 @@ WHERE
             replacements: { orderId },
             type: QueryTypes.SELECT
         });
-        console.log("orderId",orderId);
 
         const status = updateData.order_status;      
         const paymentStatus = updateData.payment_status; 
@@ -3185,7 +3172,6 @@ WHERE
     }
     // coupon verified
     static async checkCouponCode(patient_id, coupon_code){
-        console.log("ser",patient_id)
          if (coupon_code  == '' && patient_id == '') {
             throw new Error('Please provide valid data!');
         }

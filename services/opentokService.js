@@ -14,7 +14,6 @@ const createSession = () => {
   return new Promise((resolve, reject) => {
     opentok.createSession(
       { mediaMode: 'routed', archiveMode: 'manual' }, (error, session) => {
-        console.log(error,'error====');
       if (error) {
         return reject(error);
       }

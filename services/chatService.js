@@ -261,7 +261,6 @@ class ChatService {
                 userStatus.lastActive = new Date();
                 return await userStatus.save();
             } else {
-                console.log('called chat update');
                 return await ChatStatus.create({ userId, userType, isOnline, lastActive: new Date() });
             }
         } catch (error) {

@@ -286,7 +286,6 @@ const getCarePlanDetailsByCompanyId = async (companyId, patientId) => {
     }, {});
    // const data = JSON.parse(carePlansMap);
    // const lengthPlanDetails = data.length;
-    console.log(carePlansMap);
     const values = Object.values(carePlansMap);
     const carePlan = values[values.length -1] || null;
     carePlan.planBenefits = Array.from(carePlan.planBenefits);

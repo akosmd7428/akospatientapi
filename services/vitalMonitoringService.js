@@ -572,7 +572,6 @@ class VitalMonitoringService {
     }
 
     /*
-     console.log(healthDetails);
             const helthArr = {};
             devicelist.forEach(item => {
                 if(item.device_id == 1){

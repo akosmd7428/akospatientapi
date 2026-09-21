@@ -1,10 +1,11 @@
 const { encryptData,decryptData } = require('../config/encryption');
 class CommonHelper {
+    // SEC-025: same sanitisation on the unencrypted path.
     static sendErrorUnencrypt(res, statusCode, message, errors = []) {
         res.status(statusCode).json({
             success: false,
-            message,
-            errors
+            message: CommonHelper.sanitiseErrors(message),
+            errors: CommonHelper.sanitiseErrors(errors),
         });
     }
 
@@ -25,8 +26,38 @@ class CommonHelper {
         res.status(statusCode).json({ encryptedData, IV, tag });
     }
 
+    /**
+     * SEC-025: ~180 call sites passed a raw `error.message` in here, so Sequelize
+     * leaked table, column and constraint names to clients - accelerating
+     * exploitation of the injection sinks by removing the blind-enumeration step.
+     *
+     * Rather than edit every call site, the disclosure is closed at this single
+     * choke point: only messages the application authored are passed through.
+     * Anything that looks like a library or database error is replaced with a
+     * generic string, and the detail is logged server-side instead.
+     */
+    static sanitiseErrors(errors) {
+        const LEAKY = /\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN|Sequelize|SequelizeDatabaseError|ER_[A-Z_]+|ECONNREFUSED|ENOTFOUND|Duplicate entry|Unknown column|Table '|at Object\.|node_modules|[A-Za-z]:\\\\|\/var\/|\/usr\/)/;
+
+        const clean = (value) => {
+            if (typeof value !== 'string') return value;
+            if (LEAKY.test(value)) {
+                console.error('[security] suppressed a leaky error message:', value);
+                return 'An unexpected error occurred';
+            }
+            return value;
+        };
+
+        if (Array.isArray(errors)) return errors.map(clean);
+        return clean(errors);
+    }
+
     static sendError(res, statusCode, message, errors = []) {
-        const payload = JSON.stringify({ success: false, message, errors });
+        const payload = JSON.stringify({
+            success: false,
+            message: CommonHelper.sanitiseErrors(message),
+            errors: CommonHelper.sanitiseErrors(errors),
+        });
         const { encryptedData, IV, tag } = encryptData(payload);
         res.status(statusCode).json({ encryptedData, IV, tag });
     }

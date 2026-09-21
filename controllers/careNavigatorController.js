@@ -473,7 +473,6 @@ class CareNavigatorController {
                 }
             }
             const patient = await Patient.findOne({where: { id: patientId} }); 
-            console.log(patient,'patient===');
             if(patient){
                 await emailHelperSMTP(null, patient.email, 'Prescription Received', `<p>Hi ${patient.first_name} ${patient.last_name}, <br/></br>Your prescription is now available for download. <a href="${prescriptionURL}">Click here</a> to access your prescription. If you have any questions or need further assistance, please contact our support team at +91-8595461929.<br/><br/>Thank you!<br/>Team AkosMD</p>`); 
             }
@@ -502,7 +501,6 @@ class CareNavigatorController {
      // update report
      static async updateLabPreLabReport(req, res) {
         const {  status, report_url, id,report_remark } = req.body;
-        console.log(id);
          try {
             const updateData = {
                 "isActive": status                 
@@ -519,7 +517,6 @@ class CareNavigatorController {
             }
             return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.labOrderUpdated, { result });
          } catch (error) {
-            console.log(error);
              return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
          }
     }    

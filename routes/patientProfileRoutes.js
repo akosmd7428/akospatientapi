@@ -9,7 +9,9 @@ const router = express.Router();
 
 router.get('/profile',requireAuth(ROLES.PATIENT), validateDataEncryption(), PatientController.getPatientProfileDetails);
 router.post('/profile',requireAuth(ROLES.PATIENT), validateDataEncryption(), PatientController.createOrUpdateProfile);
-router.get('/details/:patientEmail',validateDataEncryption(), PatientController.getPatientDetails);
+// SEC-008 / SEC-028: was unauthenticated, and returned different messages for a
+// patient, a care navigator and an unknown address - an account-type oracle.
+router.get('/details/:patientEmail',requireAuth(ROLES.PATIENT, ROLES.CARE_NAVIGATOR, ROLES.HR), validateDataEncryption(), PatientController.getPatientDetails);
 router.post('/updateProfile',requireAuth(ROLES.PATIENT), validateDataEncryption(), PatientController.updateProfile);
 router.get('/patientSignIn',requireAuth(ROLES.PATIENT), validateDataEncryption(), PatientController.patientSignIn);
 router.post('/notes',requireAuth(ROLES.PATIENT), validateDataEncryption(), PatientController.updateNotes);

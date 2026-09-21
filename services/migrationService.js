@@ -138,7 +138,9 @@ class MigrationService {
 
             if (!Number(row && row.colCount)) {
                 await sequelizeDB1.query(
-                    `ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`
+                    // table, column and definition all come from the constant
+                    // MIGRATION_COLUMNS list above, never from a request.
+                    `ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}` // sql-safe: constants only
                 );
             }
         }
@@ -785,7 +787,7 @@ class MigrationService {
         let existing = null;
         if (orClauses.length) {
             const [row] = await sequelizeDB1.query(
-                `SELECT id FROM labPackagesMaster WHERE ${orClauses.join(' OR ')} LIMIT 1`,
+                `SELECT id FROM labPackagesMaster WHERE ${orClauses.join(' OR ')} LIMIT 1`, // sql-safe: orClauses are hardcoded fragments, values bound via orReps
                 { replacements: orReps, type: QueryTypes.SELECT, transaction }
             );
             existing = row || null;
@@ -1111,7 +1113,7 @@ class MigrationService {
         orReps.labName = labName;
 
         const [existing] = await sequelizeDB1.query(
-            `SELECT id, labName FROM labs WHERE ${orClauses.join(' OR ')} LIMIT 1`,
+            `SELECT id, labName FROM labs WHERE ${orClauses.join(' OR ')} LIMIT 1`, // sql-safe: orClauses are hardcoded fragments, values bound via orReps
             { replacements: orReps, type: QueryTypes.SELECT, transaction }
         );
 
@@ -1382,10 +1384,11 @@ class MigrationService {
                 summary.details.push(detail);
             } catch (error) {
                 await transaction.rollback();
-                console.log(
-                    `[migrateLab] failed legacy_lab_id=${labPayload.id} name=${labPayload.diagnostic_name}:`,
+                console.error(
+                    `[migrateLab] failed legacy_lab_id=${labPayload.id}:`,
                     error.message,
-                    error.original ? `(sqlMessage: ${error.original.sqlMessage}, sql: ${error.sql})` : ''
+                    // SEC-025: the raw SQL and sqlMessage are no longer printed.
+                    ''
                 );
                 summary.labs_failed += 1;
                 summary.failures.push({

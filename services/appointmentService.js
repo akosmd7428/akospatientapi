@@ -18,7 +18,6 @@ class AppointmentService {
         try {
             const appointment = await Appointment.create(data);
             const patient = await Patient.findOne({ where: { id: appointment.patientId } });
-            console.log("patiennt booking time");
             // Prepare dynamic content for SMS
            // patient.email = "mohan.pal@akosmdtech.com"
             const patientName = patient.first_name +' '+patient.last_name;
@@ -373,7 +372,6 @@ class AppointmentService {
             );
             const appointment = await Appointment.findOne({ where: { id: appointmentId } });
             const patient = await Patient.findOne({ where: { id: appointment.patientId } });
-            console.log(patient,'patient');
             
             // Prepare dynamic content for SMS
             const patientName = patient.first_name +' '+patient.last_name;
@@ -761,7 +759,6 @@ class AppointmentService {
                 groupIds: groupIds,
                 roomAlias: roomAlias
             }
-            console.log(data,'Final Call list for talk to doctor as per patient and doctor availability===============');
           return data;
         // } catch (error) {
         //   throw new Error('Error fetching doctor details');

@@ -319,7 +319,7 @@ io.on("connection", (socket) => {
       }
     } catch (error) {
       if (callback) {
-        callback({ success: false, error: error.message });
+        callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
       }
     }
   });
@@ -352,7 +352,7 @@ io.on("connection", (socket) => {
       }
     } catch (error) {
       if (callback) {
-        callback({ success: false, error: error.message });
+        callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
       }
     }
   });
@@ -365,7 +365,7 @@ io.on("connection", (socket) => {
       const chatList = await ChatService.getChatList(socket.user.id, socket.user.type);
       callback({ success: true, userId, userType, chatList });
     } catch (error) {
-      callback({ success: false, error: error.message });
+      callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
     }
   });
 
@@ -377,7 +377,7 @@ io.on("connection", (socket) => {
       const chatHistory = await ChatService.getChatHistory(socket.user.id, socket.user.type, receiverId, receiverType);
       callback({ success: true, senderId, senderType, receiverId, receiverType, chatHistory });
     } catch (error) {
-      callback({ success: false, error: error.message });
+      callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
     }
   });
 
@@ -388,7 +388,7 @@ io.on("connection", (socket) => {
       const notifications = await NotificationService.getNotifications(role, referenceId, filter);
       callback({ success: true, notifications });
     } catch (error) {
-      callback({ success: false, error: error.message });
+      callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
     }
   });
 
@@ -400,7 +400,7 @@ io.on("connection", (socket) => {
       callback({ success: true, callDetails });
     //} catch (error) {
      // console.log("chatCallBack error", error.message);
-     // callback({ success: false, error: error.message });
+     // callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
    // }
   });
 
@@ -429,7 +429,7 @@ io.on("connection", (socket) => {
       } catch (error) {
           // Optionally send back an error to the client
           if (callback) {
-              callback({ success: false, error: error.message });
+              callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
           }
       }
   });
@@ -465,7 +465,7 @@ io.on("connection", (socket) => {
     // } catch (error) {
     //     // Optionally send back an error to the client
     //     if (callback) {
-    //         callback({ success: false, error: error.message });
+    //         callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
     //     }
     // }
   });
@@ -495,7 +495,7 @@ io.on("connection", (socket) => {
       } catch (error) {
           // Optionally send back an error to the client
           if (callback) {
-              callback({ success: false, error: error.message });
+              callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
           }
       }
   });
@@ -522,7 +522,7 @@ io.on("connection", (socket) => {
       } catch (error) {
           // Optionally send back an error to the client
           if (callback) {
-              callback({ success: false, error: error.message });
+              callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
           }
       }
   });
@@ -545,7 +545,7 @@ io.on("connection", (socket) => {
     } catch (error) {
         // Optionally send back an error to the client
         if (callback) {
-            callback({ success: false, error: error.message });
+            callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
         }
     }
   });
@@ -563,7 +563,7 @@ io.on("connection", (socket) => {
 
     //} catch (error) {
      // console.log("chatCallBack error", error.message);
-     // callback({ success: false, error: error.message });
+     // callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
    // }
   });
 
@@ -583,7 +583,7 @@ io.on("connection", (socket) => {
 
     //} catch (error) {
      // console.log("chatCallBack error", error.message);
-     // callback({ success: false, error: error.message });
+     // callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
    // }
   });
 
@@ -602,7 +602,7 @@ io.on("connection", (socket) => {
 
     //} catch (error) {
      // console.log("chatCallBack error", error.message);
-     // callback({ success: false, error: error.message });
+     // callback({ success: false, code: 'INTERNAL_ERROR' }); // SEC-025
    // }
   });
   

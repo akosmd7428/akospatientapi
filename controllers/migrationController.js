@@ -17,7 +17,7 @@ class MigrationController {
             }
 
             const result = await MigrationService.migrateLabsPayload(payload);
-            console.log('[migrateLabData] summary:', JSON.stringify({
+            console.error('[migrateLabData] summary:', JSON.stringify({
                 labs_processed: result.labs_processed,
                 labs_created: result.labs_created,
                 labs_failed: result.labs_failed,
@@ -31,7 +31,6 @@ class MigrationController {
                 'Lab data migrated successfully'
             );
         } catch (error) {
-            console.log('migrateLabData error:', error);
             return CommonHelper.sendErrorUnencrypt(
                 res,
                 STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -62,7 +61,6 @@ class MigrationController {
                 'Package data migrated successfully'
             );
         } catch (error) {
-            console.log('migratePackagesData error:', error);
             return CommonHelper.sendErrorUnencrypt(
                 res,
                 STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -93,7 +91,6 @@ class MigrationController {
                 'Doctor data migrated successfully'
             );
         } catch (error) {
-            console.log('migrateDoctorData error:', error);
             return CommonHelper.sendErrorUnencrypt(
                 res,
                 STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -124,7 +121,6 @@ class MigrationController {
                 'Corporate data migrated successfully'
             );
         } catch (error) {
-            console.log('migrateCorporateData error:', error);
             return CommonHelper.sendErrorUnencrypt(
                 res,
                 STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR,

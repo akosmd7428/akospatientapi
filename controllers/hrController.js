@@ -28,7 +28,6 @@ class HrController {
     static async getProfileDetails(req, res) {
         try {           
             const userDetails = await Hr.findByPk(req.user.id);
-            console.log(userDetails);
             const userProfileData = userDetails?
             {   
                 id: userDetails.id,
@@ -165,7 +164,6 @@ class HrController {
             const  message  = 'please take hra assesment.';
             const { email } = req.query;        
             const preEmployer = await PatientService.getProfileByEmailId(email);
-            console.log(preEmployer);
             const emailContent = `
             <p>Care Navigator Details:</p>
             <p><strong>Name:</strong> ${preEmployer.first_name} ${preEmployer.last_name}</p>
@@ -175,7 +173,6 @@ class HrController {
             const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'HRA assesment avail', emailContent);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, msg);
         } catch (error) {
-            console.log(error);
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
@@ -538,7 +535,6 @@ class HrController {
                 }
             }
             const patient = await Patient.findOne({where: { id: patientId} }); 
-            console.log(patient,'patient===');
             if(patient){
                 await emailHelperSMTP(null, patient.email, 'Prescription Received', `<p>Hi ${patient.first_name} ${patient.last_name}, <br/></br>Your prescription is now available for download. <a href="${prescriptionURL}">Click here</a> to access your prescription. If you have any questions or need further assistance, please contact our support team at +91-8595461929.<br/><br/>Thank you!<br/>Team AkosMD</p>`); 
             }
@@ -557,7 +553,6 @@ class HrController {
         try {
             const { message,email } = req.body;
            // const { email } = req.user;
-            console.log(email);
             const hrdetails = await HelpService.getHrDetailsByEmail(email);
 
             const emailContent = `

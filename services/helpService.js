@@ -47,12 +47,10 @@ class HelpService {
   }
 
   static async getHrDetailsByEmail(email) {
-    console.log(email);
     const hrDetails = await Hr.findOne({
       where: { email },
       attributes: ['name', 'email', 'phone'],
     });
-    console.log(hrDetails);
     if (!hrDetails) {
       throw new Error('hr not found');
     }

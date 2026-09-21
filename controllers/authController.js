@@ -32,7 +32,7 @@ class AuthController {
       // SEC-016: this previously logged req.body here. validateDataEncryption has
       // already decrypted it by this point, so it printed the plaintext email and
       // password of every login attempt to the process log.
-      const getRole = req.header("role") || null;
+      const getRole = req.header("role") || null; // pre-auth-selector (SEC-001)
       let userDetails;
       // The role selects which table to check. It is not an authorization
       // decision - the password must still match - and the issued token's role
@@ -142,7 +142,7 @@ class AuthController {
         // SEC-016: removed a console.log of the company row.
       }
      // return false;
-      const getRole = req.header("role") || null;
+      const getRole = req.header("role") || null; // pre-auth-selector (SEC-001)
       let userDetails;
       //Login as Patient after first time
       let { token, user, role } = await AuthService.login({ email, password, getRole });
@@ -401,7 +401,6 @@ class AuthController {
                       await Promise.all(
                       doctors.map(doctor => PatientService.assignedDoctorToPatient(doctor.id,pId))
                     );
-                    console.log("All doctors have been assigned to the patient successfully.");
                   }
                 }
               return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.userCreated, { createdUserDetails });

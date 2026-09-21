@@ -31,7 +31,6 @@ class DataService {
     }
 
     static async getAll(type) {
-        console.log('tt',type);
         switch(type) {
             case 'medications':
                 return await Medication.findAll({

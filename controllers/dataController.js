@@ -10,7 +10,6 @@ class DataController {
     static async getData(req, res) {
         try {
             const { type } = req.params;
-            console.log(req.params);
             const data = await DataService.getAll(type);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { data });
         } catch (error) {
@@ -20,7 +19,6 @@ class DataController {
 
     static async getStates(req, res) {
         try {
-            console.log("get state");
             const states = await DataService.getStates();
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { states });
         } catch (error) {

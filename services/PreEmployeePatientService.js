@@ -65,7 +65,6 @@ class PreEmployeePatientService {
         })):{};
         return response;
       } catch (error) {    
-        console.log(error);
         throw new Error('Error fetching preemployee detail1');
       }
     }
@@ -202,7 +201,6 @@ class PreEmployeePatientService {
         }
         return response;
       } catch (error) {   
-        console.log(error);
         throw new Error('Error fetching hra assesment detail');
       }
     }
@@ -249,7 +247,6 @@ class PreEmployeePatientService {
             })):{};
             return responseAvail;
         } catch (error) {   
-            console.log(error);
             throw new Error('Error fetching pending hra detail');
         }
     }
@@ -286,7 +283,6 @@ class PreEmployeePatientService {
             return responseMonth;
            
         } catch (error) {   
-            console.log(error);
             throw new Error('Error fetching data month wise report detail');
         }
 
@@ -338,7 +334,6 @@ class PreEmployeePatientService {
          }
          return response;
         }catch(error){
-            console.log(error);
             throw new Error('Error fetching data call taken detail');
         }
     }
@@ -404,7 +399,6 @@ class PreEmployeePatientService {
                     replacements.fromDate = from_date;
                     replacements.toDate = to_date;
                 }
-                console.log(replacements);
                 const result = await sequelizeDB1.query(query, {  
                     replacements,      
                     type: QueryTypes.SELECT,
@@ -469,7 +463,6 @@ class PreEmployeePatientService {
         // Output the result            
         return arrayOfStatusCounts;
         }catch(error){
-           console.log(error);
             throw new Error('Error fetching data cardio detail');
         }
     }
@@ -564,7 +557,6 @@ class PreEmployeePatientService {
             // Output the result            
             return arrayOfStatusCounts;
         }catch(error){
-           console.log(error);
             throw new Error('Error fetching data hyper detail');
         }
     }  
@@ -690,7 +682,6 @@ class PreEmployeePatientService {
             }
           
         }catch(error){
-            console.log(error);
             throw new Error('Error fetching data employee new added detail');
         }
     }
@@ -796,8 +787,6 @@ class PreEmployeePatientService {
             }else{
                 query +=` AND p.is_active = 1`;
             } 
-            console.log(status) ;         
-            console.log(query);
            // const replacements = {};
             const replacements = {         
                 companyId: companyId  // The doctor's ID
@@ -824,8 +813,6 @@ class PreEmployeePatientService {
                 const updateData = {
                     "is_active" : status           
                 }
-                console.log(updateData);
-                console.log(patientId);
                 // const data = await Patient.update(updateData, { 
                 //     where: { id: patientId } 
                 // });
@@ -840,7 +827,6 @@ class PreEmployeePatientService {
                 });
                 return userDetails;
             }catch(error){
-                console.log(error);
                 throw new Error('Error fetching data employee active detail');
             }
     }
@@ -868,11 +854,9 @@ class PreEmployeePatientService {
                 replacements,
                 type: QueryTypes.SELECT,
             });
-            console.log(result);
             const totalEmp = result.count;
             return totalEmp;
         }catch(error){
-            console.log(error);
             throw new Error('Error fetching data employee total employee');
         }  
     }
@@ -907,7 +891,6 @@ class PreEmployeePatientService {
             let empCallTaken = result2?result2.length:0; 
             return empCallTaken;
         }catch(error){
-            console.log(error);
             throw new Error('Error fetching data employee taken call');
         }  
     }
@@ -944,7 +927,6 @@ class PreEmployeePatientService {
             let assesmentTaken = result3?result3.length:0;
             return assesmentTaken;
         }catch(error){
-            console.log(error);
             throw new Error('Error fetching data employee taken assesment detail');
         }  
     }
@@ -981,7 +963,6 @@ class PreEmployeePatientService {
         let labBookTaken = result4?result4.length:0;  
         return labBookTaken;
         }catch(error){
-            console.log(error);
             throw new Error('Error fetching data employee taken booking detail');
         }  
     }
@@ -1016,7 +997,6 @@ class PreEmployeePatientService {
           let empCallTaken = result2?result2.length:0; 
           return empCallTaken;
       }catch(error){
-          console.log(error);
           throw new Error('Error fetching data employee taken call');
       }  
   }
@@ -1053,7 +1033,6 @@ class PreEmployeePatientService {
           let assesmentTaken = result3?result3.length:0;
           return assesmentTaken;
       }catch(error){
-          console.log(error);
           throw new Error('Error fetching data employee taken assesment detail');
       }  
   }
@@ -1090,7 +1069,6 @@ class PreEmployeePatientService {
       let labBookTaken = result4?result4.length:0;  
       return labBookTaken;
       }catch(error){
-          console.log(error);
           throw new Error('Error fetching data employee taken booking detail');
       }  
   }
@@ -1238,7 +1216,6 @@ class PreEmployeePatientService {
     
             return results;
         } catch (error) {
-            console.log(error);
             throw new Error(`Error fetching lab orders: ${error.message}`);
         }
     };

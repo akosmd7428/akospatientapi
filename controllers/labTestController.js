@@ -305,7 +305,6 @@ class labTestController {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_402_PAYMENT_REQUIRED,messages.paymentFailed,{});
             }
         } catch (error) {
-            console.log(error.message)
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         } 
 
@@ -320,7 +319,6 @@ class labTestController {
             if(razorpay_payment_id!=''){
                const orderDetail = await LabTestService.getOrderDetailsByRazorpayOrder(razorpay_order_id);              
                const { id } = orderDetail;
-               console.log(id);
              //  let orderId = id;
                updateData = {
                 "isPaid": true,
@@ -503,13 +501,11 @@ class labTestController {
 
      // redcliff aloc number
     static async getRedcliffAloc(req, res){     
-        console.log("lkllk");
         try {    
             //const address = await LabTestService.getLabTestAddress(req.query.id);  
             //let state = address.state; 
             //let city = address.city;   
             let areaString = req.query.area  
-             console.log("lkllk",areaString);
             const redcliff_aloc = await LabTestService.getRedcliffAloc(areaString);          
             // latitudae and langitude
             const derdata = redcliff_aloc.data;   
@@ -523,14 +519,12 @@ class labTestController {
         try {    
             const {aloc,collection_date} = req.body;
             const latLong = await LabTestService.getRedcliffLatLong(aloc);
-            console.log(latLong.data);          
             const lat = latLong.data.latitude;
             const long = latLong.data.longitude;
             const slotData = await LabTestService.getRedcliffCollectionSlot(collection_date,lat,long);
             const slots = slotData.data         
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully", { slots });
         } catch (error) {
-            console.log(error.message);
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
@@ -543,7 +537,6 @@ class labTestController {
            // return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully", { slots });
             return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully", { slots });
         } catch (error) {
-            console.log(error.message);
             //return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
             return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
@@ -552,10 +545,8 @@ class labTestController {
     static async redCliffReport(req,res){
           try {    
             const data= req.body;
-            console.log("webhook ===",data);
             return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully", { data });
         } catch (error) {
-            console.log(error.message);
             return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
@@ -564,10 +555,8 @@ class labTestController {
     static async getRedcliffReport(req,res){
           try {    
             const data= req.body;
-            console.log("webhook ===",data);
             return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully", { data });
         } catch (error) {
-            console.log(error.message);
             return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
@@ -591,7 +580,6 @@ class labTestController {
                  return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully", { data });
             }         
         } catch (error) {
-            console.log(error.message);
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
 
@@ -605,7 +593,6 @@ class labTestController {
         
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Data has been submitted", { checkPatientForCall });       
         } catch (error) {
-            console.log(error.message);
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
@@ -647,7 +634,6 @@ class labTestController {
                 return CommonHelper.sendError(res,  STATUS_CODE.HTTP_402_PAYMENT_REQUIRED,messages.paymentFailed,{});
             }
         } catch (error) {
-            console.log(error.message)
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         } 
 
@@ -668,7 +654,6 @@ class labTestController {
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "No coupon found",{result});
             }
         } catch (error) {
-            console.log(error.message)
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         } 
     }

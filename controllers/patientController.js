@@ -140,8 +140,6 @@ class PatientController {
                         //Handle Dependents Details and Family History
                         await PatientService.createOrUpdatePatientProfile(dependent, id, true);
                         //send email to the patient if age is 18+
-                        console.log(dependent,'dependent====');
-                        console.log(id,'id====');
                         
                         if(dependent.age > 17 && dependent.id != req.user.id){
                             const profileCompletionLink = `${PATIENT_FRONTEND_URL}/forgot-password?email=${dependent.email}`;
@@ -193,7 +191,6 @@ class PatientController {
 
     static async getPatientDetails(req, res) {
         const { patientEmail } = req.params;
-        console.log("pEmail",patientEmail);
 
         try {
             const patientData = await PatientService.getProfileByPatientEmail(patientEmail);
@@ -231,12 +228,15 @@ class PatientController {
                     }
                 }
             }
-            const careNavigator = await CareNavigator.findOne({ where : { email : patientEmail } });
-            if(careNavigator){
-                CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "You are not authorized to logged In.");
-            }else{
-                CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No user found with the provided email.");
-            }
+            /**
+             * SEC-028: this returned three distinguishable outcomes - success,
+             * "You are not authorized to logged In." (a care navigator) and
+             * "No user found..." (unregistered) - from one unauthenticated GET,
+             * classifying any address by account type.
+             *
+             * One generic message for every negative outcome now.
+             */
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.userNotFound);
         } catch (error) {
             CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
