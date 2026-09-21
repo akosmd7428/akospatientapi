@@ -283,9 +283,20 @@ class PatientController {
         }
     }
 
+    /**
+     * SEC-011 / SEC-008: this returned a full patient record keyed on a `token`
+     * query parameter that was simply the patient's email address - the XOR decode
+     * the hardcoded key guarded had been commented out, so `?token=<email>` was
+     * accepted verbatim on an unauthenticated route.
+     *
+     * SEC-010: the hardcoded XOR key is deleted rather than replaced; it protected
+     * nothing.
+     *
+     * The subject now comes from the authenticated session. Staff may look up a
+     * patient in their own company; a patient gets only their own record.
+     */
     static async getPrescriptionDetail(req, res) {
-        let { email, token, cid } = req.query;
-        const secretKey = "8D3f7c1A9bE4xT2zLwQ5mR8oNpV6yJ1";
+        let { cid } = req.query;
         let patientId;
         let patientDetails;
         let patientDetail;
@@ -296,22 +307,17 @@ class PatientController {
             "email" : "support@akosmd.in",
             "phone" : "8595461929"
         }, doctorDetail: {}, prescriptionDetail: {} };
-        if(!email){
-            throw new Error("Something went wrong!");
+        // SEC-011: the subject is the authenticated user, or a patient the caller
+        // is explicitly authorised for. It is never taken from a query parameter.
+        patientId = req.user.role === ROLES.PATIENT
+            ? req.user.id
+            : await assertCanAccessPatient(req.user, req.query.patientId);
+
+        const patientDet = await Patient.findByPk(patientId);
+        if (!patientDet) {
+            throw new ForbiddenError();
         }
-        // Decode token if provided
-        if (token) {
-            // token = decodeURIComponent(token);
-            // for (let i = 0; i < token.length; i++) {
-                // decryptedPatientEmail += String.fromCharCode(token.charCodeAt(i) ^ secretKey.charCodeAt(i % secretKey.length));
-            // }
-            // if(decryptedPatientEmail){
-                const patientDet = await Patient.findOne({ where: { email : token } });
-                if(patientDet){
-                    patientId = patientDet.id;
-                }
-            // }
-        }
+        const email = patientDet.email;
         
         // Fetch patient details if patientId is available
         if (patientId) {

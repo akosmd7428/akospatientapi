@@ -2,7 +2,11 @@ const express = require('express');
 const { requireAuth, ROLES } = require('../middleware/requireAuth'); // SEC-001
 const validateSchema = require('../middleware/validateSchema');
 const PatientAssessmentController = require('../controllers/patientAssessmentController');
-const patientAssessmentSchema = require('../validation/patientAssessmentValidator');
+// SEC-027: this imported the MODULE rather than destructuring the schema, so the
+// value passed to validateSchema was an object with no .validate method - a
+// TypeError on every request to this router. The guard in validateSchema now
+// catches this class of mistake at boot instead of at request time.
+const { patientAssessmentSchema } = require('../validation/patientAssessmentValidator');
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
 const router = express.Router();
 

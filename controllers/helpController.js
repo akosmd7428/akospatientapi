@@ -31,7 +31,7 @@ class HelpController {
         <p><strong>Last Name:</strong> ${patient.last_name}</p>
         <p><strong>Email:</strong> ${patient.email}</p>
         <p><strong>Mobile:</strong> ${patient.phone}</p>
-        <p><strong>Message:</strong> ${message}</p>
+        <p><strong>Message:</strong> ${escapeHtml(message)}</p>
       `;
 
       const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'Patient Help Request', emailContent);

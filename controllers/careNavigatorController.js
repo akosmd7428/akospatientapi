@@ -358,7 +358,7 @@ class CareNavigatorController {
             <p><strong>Name:</strong> ${careNavigator.name}</p>
             <p><strong>Email:</strong> ${careNavigator.email}</p>
             <p><strong>Mobile:</strong> ${careNavigator.phone}</p>
-            <p><strong>Message:</strong> ${message}</p>
+            <p><strong>Message:</strong> ${escapeHtml(message)}</p>
             `;
 
             const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'Care Navigator Help Request', emailContent);

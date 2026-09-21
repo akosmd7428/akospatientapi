@@ -79,7 +79,11 @@ class AuthService {
             throw new UnauthorizedError(messages.invalidCredentials);
         }
 
-        const user = await Model.findOne({ where: { email } });
+        // SEC-024: Patient excludes `password` by default now, so the auth path
+        // must opt in explicitly. Only this query and the reset path do.
+        const user = Model === Patient
+            ? await Patient.scope('withPassword').findOne({ where: { email } })
+            : await Model.findOne({ where: { email } });
 
         // Runs even when the account does not exist, so the two paths cost the same.
         const { ok, needsRehash } = await verifyPassword(password, user && user.password);

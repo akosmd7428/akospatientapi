@@ -169,9 +169,9 @@ class HrController {
             const emailContent = `
             <p>Care Navigator Details:</p>
             <p><strong>Name:</strong> ${preEmployer.first_name} ${preEmployer.last_name}</p>
-            <p><strong>Email:</strong> ${email}</p>
+            <p><strong>Email:</strong> ${escapeHtml(email)}</p>
             <p><strong>Mobile:</strong> ${preEmployer.phone}</p>
-            <p><strong>Message:</strong> ${message}</p>            `;
+            <p><strong>Message:</strong> ${escapeHtml(message)}</p>            `;
             const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'HRA assesment avail', emailContent);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, msg);
         } catch (error) {
@@ -192,7 +192,7 @@ class HrController {
     //         <p><strong>Name:</strong> ${careNavigator.name}</p>
     //         <p><strong>Email:</strong> ${careNavigator.email}</p>
     //         <p><strong>Mobile:</strong> ${careNavigator.phone}</p>
-    //         <p><strong>Message:</strong> ${message}</p>
+    //         <p><strong>Message:</strong> ${escapeHtml(message)}</p>
     //         `;
 
     //         const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'Care Navigator Help Request', emailContent);
@@ -451,7 +451,7 @@ class HrController {
             <p><strong>Name:</strong> ${careNavigator.name}</p>
             <p><strong>Email:</strong> ${careNavigator.email}</p>
             <p><strong>Mobile:</strong> ${careNavigator.phone}</p>
-            <p><strong>Message:</strong> ${message}</p>
+            <p><strong>Message:</strong> ${escapeHtml(message)}</p>
             `;
 
             const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'Care Navigator Help Request', emailContent);
@@ -565,7 +565,7 @@ class HrController {
             <p><strong>Name:</strong> ${hrdetails.name}</p>
             <p><strong>Email:</strong> ${hrdetails.email}</p>
             <p><strong>Mobile:</strong> ${hrdetails.phone}</p>
-            <p><strong>Message:</strong> ${message}</p>
+            <p><strong>Message:</strong> ${escapeHtml(message)}</p>
             `;
 
             const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'HR Help Request', emailContent);

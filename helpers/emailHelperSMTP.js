@@ -9,16 +9,27 @@ const {
 const { logError } = require('./logErrorHelper');
 
 // Create a transporter object
+/**
+ * SEC-034: `ciphers: 'SSLv3'` constrained the cipher list to suites modern
+ * OpenSSL has removed, so the negotiation either failed or fell back to a weak
+ * one - on mail carrying password-reset OTPs and appointment details.
+ *
+ * requireTLS makes an unavailable STARTTLS a delivery failure rather than a
+ * silent plaintext send, and rejectUnauthorized verifies the server certificate.
+ * No `ciphers` override: Node's defaults are correct and stay current.
+ */
 const transporter = nodemailer.createTransport({
   host: SMTP_SERVER,
-  port: SMTP_PORT,
-  secure: false, // true for 465, false for other ports
+  port: Number(SMTP_PORT) || 587,
+  secure: Number(SMTP_PORT) === 465, // implicit TLS on 465, STARTTLS otherwise
+  requireTLS: true,
   auth: {
     user: SMTP_USERNAME,
     pass: SMTP_PASSWORD,
   },
   tls: {
-    ciphers: 'SSLv3',
+    minVersion: 'TLSv1.2',
+    rejectUnauthorized: true,
   },
 });
 

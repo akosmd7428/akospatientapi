@@ -1,3 +1,4 @@
+const { escapeHtml, safeImageSrc } = require('./escapeHtml'); // SEC-015
 const { generatePdf } = require('./generatePdf'); // Ensure you have this utility
 const { sendSms } = require('../services/smsService');
 const { emailHelper } = require('../helpers/emailHelper'); // Adjust the path as needed
@@ -23,7 +24,7 @@ const generatePrescription = async (data) => {
                     <td style="width:40%;"></td>
                     <td align="right" style="text-align:right;width:50%;">
                         <h3 style="color: #444; font-size: 16px; font-weight: 400; margin: 8px 0;">
-                            <strong>Prescription No.:</strong> ${details.prescriptionUniqueId}
+                            <strong>Prescription No.:</strong> ${escapeHtml(details.prescriptionUniqueId)}
                         </h3>
                         <h3 style="color: #444; font-size: 16px; font-weight: 400; margin: 8px 0;">
                             <strong>Prescription Date:</strong> ${new Date().toISOString().split('T')[0]}
@@ -104,7 +105,7 @@ const generatePrescription = async (data) => {
                             <td style="width:40%;"></td>
                             <td align="right" style="text-align:right;width:50%;">
                                 <h3 style="color: #444; font-size: 16px; font-weight: 400; margin: 8px 0;">
-                                    <strong>Prescription No.:</strong> ${details.prescriptionUniqueId}
+                                    <strong>Prescription No.:</strong> ${escapeHtml(details.prescriptionUniqueId)}
                                 </h3>
                                 <h3 style="color: #444; font-size: 16px; font-weight: 400; margin: 8px 0;">
                                     <strong>Prescription Date:</strong> ${new Date().toISOString().split('T')[0]}
@@ -123,13 +124,13 @@ const generatePrescription = async (data) => {
                                     Patient
                                 </h3>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                                    <strong>Name:</strong> ${details.patient.name}
+                                    <strong>Name:</strong> ${escapeHtml(details.patient.name)}
                                 </h4>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                                    <strong>Age:</strong> ${details.patient.age} years
+                                    <strong>Age:</strong> ${escapeHtml(details.patient.age)} years
                                 </h4>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                                    <strong>Gender:</strong> ${details.patient.gender}
+                                    <strong>Gender:</strong> ${escapeHtml(details.patient.gender)}
                                 </h4>
                             </td>
                             <td></td>
@@ -138,10 +139,10 @@ const generatePrescription = async (data) => {
                                     Doctor
                                 </h3>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                                    <strong>Name:</strong> ${details.doctor.name}
+                                    <strong>Name:</strong> ${escapeHtml(details.doctor.name)}
                                 </h4>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                                    <strong>Speciality:</strong> ${details.doctor.speciality}
+                                    <strong>Speciality:</strong> ${escapeHtml(details.doctor.speciality)}
                                 </h4>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
                                     <strong>Reg. No:</strong> ${details.doctor.reg_no || 'N/A'}
@@ -154,32 +155,32 @@ const generatePrescription = async (data) => {
             <section style="width: 100%; height: auto; border-bottom: 2px solid #444; padding: 10px 0;">
                 <div style="width: 100%; margin-bottom: 10px;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Chief Complaints: </span> ${details.chiefComplaints}
+                        <span style="font-weight: 700;">Chief Complaints: </span> ${escapeHtml(details.chiefComplaints)}
                     </h4>
                 </div>
                 <div style="width: 100%; margin-bottom: 10px;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Diagnosis: </span> ${details.diagnosis}
+                        <span style="font-weight: 700;">Diagnosis: </span> ${escapeHtml(details.diagnosis)}
                     </h4>
                 </div>
                 <div style="width: 100%; margin-bottom: 10px;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Relevant Points From History: </span> ${details.previousHistory}
+                        <span style="font-weight: 700;">Relevant Points From History: </span> ${escapeHtml(details.previousHistory)}
                     </h4>
                 </div>
                 <div style="width: 100%; margin-bottom: 10px;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Lab Findings:</span> ${details.labFindings}
+                        <span style="font-weight: 700;">Lab Findings:</span> ${escapeHtml(details.labFindings)}
                     </h4>
                 </div>
                 <div style="width: 100%;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Suggested Investigations:</span> ${details.suggestedInvestigations}
+                        <span style="font-weight: 700;">Suggested Investigations:</span> ${escapeHtml(details.suggestedInvestigations)}
                     </h4>
                 </div>
                 <div style="width: 100%; margin-bottom: 10px;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Special Instructions: </span> ${details.specialInstructions}
+                        <span style="font-weight: 700;">Special Instructions: </span> ${escapeHtml(details.specialInstructions)}
                     </h4>
                 </div>
             </section>
@@ -201,21 +202,21 @@ const generatePrescription = async (data) => {
                         ${medicines.map((medicine, index) => `
                             <tr style="text-align: left; color: #444; font-weight: 400;">
                                 <td style="text-align: left; color: #444; font-weight: 400;">${index + 1}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.medicineName}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.frequency}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.duration}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.strength}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.drugForm}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.instructions}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${escapeHtml(medicine.medicineName)}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${escapeHtml(medicine.frequency)}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${escapeHtml(medicine.duration)}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${escapeHtml(medicine.strength)}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${escapeHtml(medicine.drugForm)}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${escapeHtml(medicine.instructions)}</td>
                             </tr>
                         `).join('')}
                     </tbody>
                 </table>
                 <div style="margin-top: 30px;">
                     <div style="width: 100px; height: auto; background-color: #efefef; display: flex; justify-content: center; align-items: center;">
-                        <img src="${details.signature}" alt="signature" style="max-width: 100%; height: auto;">
+                        <img src="${safeImageSrc(details.signature)}" alt="signature" style="max-width: 100%; height: auto;">
                     </div>
-                    <h4 style="text-align: left; color: #444; font-weight: 400; margin: 15px 0;">(${details.doctor.name})</h4>
+                    <h4 style="text-align: left; color: #444; font-weight: 400; margin: 15px 0;">(${escapeHtml(details.doctor.name)})</h4>
                 </div>
             </section>
         </section>
@@ -247,14 +248,14 @@ const generatePrescription = async (data) => {
         await PatientService.savePrescription(pdfLink, details);
         // if(shortURL){
             // Send email
-        //     await emailHelper(null, details.patient.email, 'Prescription Received', `<p>Hi ${details.patient.name}, Your prescription from AkosMD is available for download <a href="${shortURL}">click here</a></p>`);                    
+        //     await emailHelper(null, details.patient.email, 'Prescription Received', `<p>Hi ${escapeHtml(details.patient.name)}, Your prescription from AkosMD is available for download <a href="${shortURL}">click here</a></p>`);                    
         //     // Send SMS
         //     // const smsMessage = `Your prescription is ready. Download it from: ${pdfLink}`;
-        //     const smsMessage = `Hi ${details.patient.name}, Your prescription from AkosMD is available for download here ${shortURL}.`
+        //     const smsMessage = `Hi ${escapeHtml(details.patient.name)}, Your prescription from AkosMD is available for download here ${shortURL}.`
         //     await sendSms(details.patient.phone, smsMessage);
         // }
-        // await emailHelperSMTP(null, details.patient.email, 'Prescription Received', `<p>Hi ${details.patient.name}, Your prescription from AkosMD is available for download <a href="${pdfLink}">click here</a></p>`);     
-        await emailHelperSMTP(null, details.patient.email, 'Prescription Received', `<p>Hi ${details.patient.name}, <br/></br>Your prescription is now available for download. <a href="${pdfLink}">Click here</a> to access your prescription. If you have any questions or need further assistance, please contact our support team at +91-8595461929.<br/><br/>Thank you!<br/>Team AkosMD</p>`);                
+        // await emailHelperSMTP(null, details.patient.email, 'Prescription Received', `<p>Hi ${escapeHtml(details.patient.name)}, Your prescription from AkosMD is available for download <a href="${pdfLink}">click here</a></p>`);     
+        await emailHelperSMTP(null, details.patient.email, 'Prescription Received', `<p>Hi ${escapeHtml(details.patient.name)}, <br/></br>Your prescription is now available for download. <a href="${pdfLink}">Click here</a> to access your prescription. If you have any questions or need further assistance, please contact our support team at +91-8595461929.<br/><br/>Thank you!<br/>Team AkosMD</p>`);                
 
         return true;
     } catch (error) {

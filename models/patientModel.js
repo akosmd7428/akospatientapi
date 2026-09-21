@@ -88,6 +88,19 @@ const Patient = sequelizeDB1.define('patient', {
 }, {
   tableName: "patient",
   timestamps: false,
+  /**
+   * SEC-024: there was no defaultScope, so every Patient.findOne returned the
+   * password hash - into objects that were then logged (SEC-016) and returned by
+   * the SSO login path.
+   *
+   * The auth path opts in explicitly with Patient.scope('withPassword').
+   */
+  defaultScope: {
+    attributes: { exclude: ['password'] },
+  },
+  scopes: {
+    withPassword: { attributes: {} },
+  },
 });
 
 
