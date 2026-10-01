@@ -1,6 +1,7 @@
 const AuthService = require('../services/authService');
 const Patient = require('../models/patientModel');
 const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient');
+const SsoLoginCode = require('../models/ssoLoginCode');
 const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
 const CommonHelper = require('../helpers/commonHelper');
@@ -13,6 +14,9 @@ const crypto = require('crypto');
 const { JWT_SECRET, PATIENT_FRONTEND_URL } = require('../config/secret');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
 const jwt = require('jsonwebtoken');
+
+// how long a generated sso login code can be used
+const SSO_CODE_EXPIRY_SECONDS = 300;
 
 class AuthController {
   static async register(req, res, next) {
@@ -195,93 +199,152 @@ class AuthController {
     return { valid: true };
   }
 
-  // sso login for an api client, the credentials are checked on the parent company when parent_client_id is sent
+  // validate the api client and find the patient, the patient is created when it does not exist yet
+  // the credentials are checked on the parent company when parent_client_id is sent
+  static async resolveSsoPatient(req) {
+    const { parent_client_id, client_id, client_secret, email, mobile } = req.body;
+    const first_name = req.body.firstname || req.body.first_name;
+    const last_name = req.body.last_name || req.body.lastname || req.body['last-name'] || '';
+    const clientIp = CommonHelper.getClientIp(req);
+    let company;
+
+    if (parent_client_id) {
+      // credentials belong to the parent company
+      const parentCompanyDetails = await PatientService.getCompanyDetails(parent_client_id);
+      if (!parentCompanyDetails[0]) {
+        return { error: { statusCode: STATUS_CODE.HTTP_401_UNAUTHORIZED, message: messages.sso_invalid_parent_client } };
+      }
+      const parentCompany = parentCompanyDetails[0];
+      const parentCheck = AuthController.validateSsoClient(parentCompany, client_secret, clientIp);
+      if (!parentCheck.valid) {
+        return { error: parentCheck };
+      }
+      // the client id is either the parent itself or one of its child companies
+      if (String(client_id) === String(parent_client_id)) {
+        company = parentCompany;
+      } else {
+        const childCompanyDetails = await PatientService.getCompanyDetailsByParent(client_id, parentCompany.id);
+        if (!childCompanyDetails[0]) {
+          return { error: { statusCode: STATUS_CODE.HTTP_401_UNAUTHORIZED, message: messages.sso_client_not_under_parent } };
+        }
+        company = childCompanyDetails[0];
+      }
+    } else {
+      // credentials belong to the company itself
+      const companyDetails = await PatientService.getCompanyDetails(client_id);
+      if (!companyDetails[0]) {
+        return { error: { statusCode: STATUS_CODE.HTTP_401_UNAUTHORIZED, message: messages.sso_invalid_client } };
+      }
+      company = companyDetails[0];
+      const clientCheck = AuthController.validateSsoClient(company, client_secret, clientIp);
+      if (!clientCheck.valid) {
+        return { error: clientCheck };
+      }
+    }
+
+    const company_id = company.id;
+    let patient = await Patient.findOne({ where: { email } });
+
+    if (patient) {
+      // an existing account may only be logged in by the client it belongs to
+      const connectedUser = await ConnectedCompaniesPatient.findOne({ where: { patientEmail : email, companyId : company_id } });
+      if (!connectedUser && Number(patient.companyId) !== Number(company_id)) {
+        return { error: { statusCode: STATUS_CODE.HTTP_403_FORBIDDEN, message: messages.sso_user_other_client } };
+      }
+    }
+
+    if (!patient) {
+      const uuid = CommonHelper.generateUuidV4();
+      // the client owns the authentication, there is no password to log in with so a random one is stored
+      const hash_password = crypto.createHash('md5').update(CommonHelper.generateUuidV4()).digest('hex');
+      const createdPatientId = await PatientService.createSsoPatient(first_name, last_name, email, mobile || '', company_id, uuid, hash_password);
+
+      if (!createdPatientId) {
+        return { error: { statusCode: STATUS_CODE.HTTP_400_BAD_REQUEST, message: "Unable to create the user." } };
+      }
+      // assign the company doctors to the new patient
+      const doctors = await DoctorService.getDoctorsByEmployer(company_id, '');
+      if (doctors && doctors.length > 0) {
+        await Promise.all(
+          doctors.map(doctor => PatientService.assignedDoctorToPatient(doctor.id, createdPatientId))
+        );
+      }
+      patient = await Patient.findOne({ where: { email } });
+    }
+
+    if (!patient) {
+      return { error: { statusCode: STATUS_CODE.HTTP_404_NOT_FOUND, message: "No patient found with the provided email." } };
+    }
+
+    return { patient, company };
+  }
+
+  // create the login token and the patient details returned by the sso apis
+  static async ssoLoginResponse(res, patient) {
+    const { token } = await AuthService.patientLogin(patient);
+    const userDetails = await PatientService.getPatientDetailsByEmail(patient.email, patient);
+    if (userDetails.length === 0) {
+      return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided email.");
+    }
+    userDetails.role = "patient";
+
+    return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails });
+  }
+
+  // sso login for an api client, the login token is returned directly
   static async ssoClientLogin(req, res, next) {
     try {
-      const { parent_client_id, client_id, client_secret, email, mobile } = req.body;
-      const first_name = req.body.firstname || req.body.first_name;
-      const last_name = req.body.last_name || req.body.lastname || req.body['last-name'] || '';
-      const clientIp = CommonHelper.getClientIp(req);
-      console.log(client_secret);
-      let company;
-
-      if (parent_client_id) {
-        // credentials belong to the parent company
-        const parentCompanyDetails = await PatientService.getCompanyDetails(parent_client_id);
-        if (!parentCompanyDetails[0]) {
-          return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_parent_client);
-        }
-        const parentCompany = parentCompanyDetails[0];
-        const parentCheck = AuthController.validateSsoClient(parentCompany, client_secret, clientIp);
-        if (!parentCheck.valid) {
-          return CommonHelper.sendErrorUnencrypt(res, parentCheck.statusCode, parentCheck.message);
-        }
-        // the client id is either the parent itself or one of its child companies
-        if (String(client_id) === String(parent_client_id)) {
-          company = parentCompany;
-        } else {
-          const childCompanyDetails = await PatientService.getCompanyDetailsByParent(client_id, parentCompany.id);
-          if (!childCompanyDetails[0]) {
-            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_client_not_under_parent);
-          }
-          company = childCompanyDetails[0];
-        }
-      } else {
-        // credentials belong to the company itself
-        const companyDetails = await PatientService.getCompanyDetails(client_id);
-        if (!companyDetails[0]) {
-          return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_client);
-        }
-        company = companyDetails[0];
-        console.log(company);
-        const clientCheck = AuthController.validateSsoClient(company, client_secret, clientIp);
-        if (!clientCheck.valid) {
-          return CommonHelper.sendErrorUnencrypt(res, clientCheck.statusCode, clientCheck.message);
-        }
+      const { patient, error } = await AuthController.resolveSsoPatient(req);
+      if (error) {
+        return CommonHelper.sendErrorUnencrypt(res, error.statusCode, error.message);
       }
+      return await AuthController.ssoLoginResponse(res, patient);
+    } catch (error) {
+      return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
+    }
+  }
 
-      const company_id = company.id;
-      let patient = await Patient.findOne({ where: { email } });
-
-      if (patient) {
-        // an existing account may only be logged in by the client it belongs to
-        const connectedUser = await ConnectedCompaniesPatient.findOne({ where: { patientEmail : email, companyId : company_id } });
-        if (!connectedUser && Number(patient.companyId) !== Number(company_id)) {
-          return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_403_FORBIDDEN, messages.sso_user_other_client);
-        }
-      }
-
+  // generate a one time sso login code for a patient, the patient portal exchanges the code for the login token
+  static async ssoGenerateCode(req, res, next) {
+    try {
+      const { patient_id } = req.body;
+      const patient = await Patient.findOne({ where: { id: patient_id } });
       if (!patient) {
-        const uuid = CommonHelper.generateUuidV4();
-        // the client owns the authentication, there is no password to log in with so a random one is stored
-        const hash_password = crypto.createHash('md5').update(CommonHelper.generateUuidV4()).digest('hex');
-        const createdPatientId = await PatientService.createSsoPatient(first_name, last_name, email, mobile || '', company_id, uuid, hash_password);
-
-        if (!createdPatientId) {
-          return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Unable to create the user.");
-        }
-        // assign the company doctors to the new patient
-        const doctors = await DoctorService.getDoctorsByEmployer(company_id, '');
-        if (doctors && doctors.length > 0) {
-          await Promise.all(
-            doctors.map(doctor => PatientService.assignedDoctorToPatient(doctor.id, createdPatientId))
-          );
-        }
-        patient = await Patient.findOne({ where: { email } });
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.sso_patient_not_found);
       }
 
+      const code = crypto.randomBytes(32).toString('hex');
+      const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+      const expiresAt = new Date(Date.now() + SSO_CODE_EXPIRY_SECONDS * 1000);
+      await SsoLoginCode.create({ codeHash, patientId: patient.id, companyId: patient.companyId || 0, expiresAt });
+
+      const login_url = `${PATIENT_FRONTEND_URL}/sso-login?code=${code}`;
+      return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.sso_code_generated, { code, expires_in: SSO_CODE_EXPIRY_SECONDS, login_url });
+    } catch (error) {
+      return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
+    }
+  }
+
+  // exchange a one time sso code for the login token, a code can be used only once and only before it expires
+  static async ssoVerifyCode(req, res, next) {
+    try {
+      const codeHash = crypto.createHash('sha256').update(req.body.code).digest('hex');
+      const ssoCode = await SsoLoginCode.findOne({ where: { codeHash } });
+      if (!ssoCode || ssoCode.usedAt || new Date(ssoCode.expiresAt) < new Date()) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_code);
+      }
+
+      // mark the code as used, the usedAt check stops the same code being used by two requests at once
+      const [updatedRows] = await SsoLoginCode.update({ usedAt: new Date() }, { where: { id: ssoCode.id, usedAt: null } });
+      if (updatedRows !== 1) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_code);
+      }
+
+      const patient = await Patient.findOne({ where: { id: ssoCode.patientId } });
       if (!patient) {
         return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided email.");
       }
-
-      const { token } = await AuthService.patientLogin(patient);
-      const userDetails = await PatientService.getPatientDetailsByEmail(email, patient);
-      if (userDetails.length === 0) {
-        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided email.");
-      }
-      userDetails.role = "patient";
-
-      return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails });
+      return await AuthController.ssoLoginResponse(res, patient);
     } catch (error) {
       return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
     }

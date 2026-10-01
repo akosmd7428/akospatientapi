@@ -55,4 +55,14 @@ const ssoClientLoginSchema = Joi.object({
   'last-name': Joi.string().allow('', null).optional(),
 }).or('firstname', 'first_name');
 
-module.exports = { registerSchema, loginSchema, loginPatientSchema,preEmpAddSchema,externalSignupSchema,ssoClientLoginSchema };
+// generate a one time sso login code for a patient
+const ssoGenerateCodeSchema = Joi.object({
+  patient_id: Joi.number().integer().positive().required(),
+});
+
+// exchange a one time sso login code for the login token
+const ssoVerifyCodeSchema = Joi.object({
+  code: Joi.string().hex().length(64).required(),
+});
+
+module.exports = { registerSchema, loginSchema, loginPatientSchema,preEmpAddSchema,externalSignupSchema,ssoClientLoginSchema,ssoGenerateCodeSchema,ssoVerifyCodeSchema };

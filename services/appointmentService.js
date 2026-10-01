@@ -949,7 +949,7 @@ class AppointmentService {
 
     static async getDashboardData(patientId) {
         const query = `
-            SELECT 
+            SELECT
                 p.first_name AS firstName,
                 p.last_name AS lastName,
                 p.id AS patientId,
@@ -958,6 +958,8 @@ class AppointmentService {
                 p.gender,
                 p.city AS city,
                 p.state AS state,
+
+                -- Last/next appointment
                 la.doctorName AS lastAppointmentDoctorName,
                 la.speciality AS lastAppointmentSpeciality,
                 la.doctorId AS lastAppointmentDoctorId,
@@ -965,20 +967,30 @@ class AppointmentService {
                 la.appointmentDate AS lastAppointmentDate,
                 la.appointmentTime AS lastAppointmentTime,
                 la.appointmentId AS lastAppointmentId,
+
+                -- Care team
                 ct.doctorId AS careTeamDoctorId,
                 ct.doctorName AS careTeamDoctorName,
                 ct.speciality AS careTeamSpeciality,
                 ct.doctorProfilePic AS careTeamDoctorProfilePic,
+
+                -- Patient details
                 pd.profilePic AS patientProfilePic,
                 pd.age AS age,
                 pd.notes AS notes,
                 pd.bloodgroup AS bloodgroup,
                 pd.medications AS medications,
-                pd.medical_allergies AS medical_allergies
-            FROM 
-                patient p
+                pd.medical_allergies AS medical_allergies,
+
+                -- Vital monitoring
+                vm.vitalDoctorId,
+                vm.param_name,
+                vm.param_value
+
+            FROM patient p
+
             LEFT JOIN (
-                SELECT 
+                SELECT
                     a.patientId,
                     d.name AS doctorName,
                     d.speciality,
@@ -987,69 +999,62 @@ class AppointmentService {
                     a.date AS appointmentDate,
                     a.time AS appointmentTime,
                     a.id AS appointmentId
-                FROM 
-                    appointments a
-                JOIN 
-                    doctor d ON a.doctorId = d.id
-                WHERE 
-                    a.patientId = :patientId 
-                    AND a.date >= CURDATE()
-                    AND a.status = 1
-                ORDER BY 
-                    a.date ASC, a.time ASC
+                FROM appointments a
+                JOIN doctor d
+                    ON a.doctorId = d.id
+                WHERE a.patientId = :patientId
+                AND a.date >= CURDATE()
+                AND a.status = 1
+                ORDER BY a.date ASC, a.time ASC
                 LIMIT 1
-            ) AS la ON p.id = la.patientId
+            ) AS la
+                ON p.id = la.patientId
+
             LEFT JOIN (
-                SELECT 
-                    pd.profile_image as profilePic,
-                    pd.age as age,
-                    pd.notes as notes,
-                    pd.bloodgroup as bloodgroup,
-                    pd.medications as medications,
-                    pd.medical_allergies as medical_allergies
-                FROM 
-                    patientDetails pd
-                WHERE 
-                    pd.patientId = :patientId
-            ) AS pd ON p.id = :patientId
+                SELECT
+                    pd.patientId,
+                    pd.profile_image AS profilePic,
+                    pd.age,
+                    pd.notes,
+                    pd.bloodgroup,
+                    pd.medications,
+                    pd.medical_allergies
+                FROM patientDetails pd
+                WHERE pd.patientId = :patientId
+            ) AS pd
+                ON p.id = pd.patientId
+
             LEFT JOIN (
-                SELECT 
+                SELECT
                     pct.patientId,
                     d.id AS doctorId,
                     d.name AS doctorName,
                     d.speciality,
                     d.profilePic AS doctorProfilePic
-                FROM 
-                    patientCareTeam pct
-                JOIN 
-                    doctor d ON pct.doctorId = d.id
-                WHERE 
-                    pct.patientId = :patientId
-                ORDER BY 
-                    pct.createdAt DESC
-                LIMIT 2
-            ) AS ct ON p.id = ct.patientId
-            WHERE 
-                p.id = :patientId
-             LEFT JOIN (
-                SELECT 
-                    vpm.patient_id,
-                    vpm.id AS doctorId,
-                    vpm.param_key_name AS param_name,
-                    vpm.param_value                    
-                FROM 
-                    vital_patient_monitoring vpm
-                JOIN 
-                    patient p ON vpm.patient_id = p.id
-                WHERE 
-                    vpm.patient_id = :patientId and vpm.param_key_id = 3 
-                ORDER BY 
-                    vpm.createdAt DESC
+                FROM patientCareTeam pct
+                JOIN doctor d
+                    ON pct.doctorId = d.id
+                WHERE pct.patientId = :patientId
+                ORDER BY pct.createdAt DESC
                 LIMIT 1
-            ) AS ct ON p.id = ct.patientId
-            WHERE 
-                p.id = :patientId
-        `;
+            ) AS ct
+                ON p.id = ct.patientId
+
+            LEFT JOIN (
+                SELECT
+                    vpm.patient_id,
+                    vpm.id AS vitalDoctorId,
+                    vpm.param_key_name AS param_name,
+                    vpm.param_value
+                FROM vital_patient_monitoring vpm
+                WHERE vpm.patient_id = :patientId
+                AND vpm.param_key_id = 3
+                ORDER BY vpm.createdAt DESC
+                LIMIT 1
+            ) AS vm
+                ON p.id = vm.patient_id
+
+            WHERE p.id = :patientId;`;
 
         const replacements = { patientId };
 

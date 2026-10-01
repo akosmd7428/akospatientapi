@@ -1533,6 +1533,9 @@ ORDER BY
     lo.bookingDate,
     lo.bookingTime,
     labAddress.address AS bookingAddress,
+    labAddress.state AS state,
+    labAddress.city AS city,
+    labAddress.zip_code AS zip_code,   
     lo.labId,
     lo.labCityName,
     lo.labBranchId,
@@ -1567,6 +1570,10 @@ ORDER BY
     lod.patientCompanyId,
 
     com.is_pament_required,
+    p.first_name,
+    p.email,
+    p.dateofbirth,
+    p.phone,
 
     /* Check previous successful order */
     CASE
@@ -1612,6 +1619,8 @@ FROM labOrders lo
 
 LEFT JOIN labOrderDetails lod 
     ON lo.id = lod.labOrderId
+LEFT JOIN patient p 
+    ON lo.patientId = p.id
 
 LEFT JOIN worksman_company_list com 
     ON lod.patientCompanyId = com.id
@@ -1675,7 +1684,16 @@ WHERE
                 companyIdPackageTest,
                 patientCompanyId,
                 is_pament_required,
-                alreadyOrdered
+                alreadyOrdered,
+                state,
+                city,
+                zip_code,
+
+                first_name,
+                email,
+                dateofbirth,
+                phone
+
             } = row;
 
             let order = acc.find(o => o.id === id);
@@ -1694,6 +1712,13 @@ WHERE
                     otherCharges,
                     totalPrice,
                     isPaid,
+                    state,
+                    city,
+                    zip_code,
+                    first_name,
+                    email,
+                    dateofbirth,
+                    phone,
                     orderStatus,
                     paymentStatus,
                     noOfTest,
