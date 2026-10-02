@@ -3168,6 +3168,54 @@ WHERE
             return data;
     }
 
+    // fetch the patient's company with its feature flags (is_sub_city etc.)
+    static async getPatientCompanyDetails(patientId){
+        const query = `
+            SELECT
+                p.id AS patient_id,
+                c.id AS company_id,
+                c.parent_id,
+                c.company_name,
+                c.employer_id,
+                c.active,
+                c.has_portal,
+                c.is_sub_city,
+                c.is_pament_required,
+                c.is_domain_check,
+                c.domain_url,
+                c.enable_email_notification,
+                c.cobrand_support,
+                c.api_access
+            FROM patient p
+            INNER JOIN worksman_company_list c ON c.id = p.companyId
+            WHERE p.id = :patientId
+            LIMIT 1;
+        `;
+        const [companyDetails] = await sequelizeDB1.query(query, {
+            replacements: { patientId },
+            type: QueryTypes.SELECT
+        });
+        return companyDetails || null;
+    }
+
+    // sub cities of a lab city (lab_sub_cities.city_id -> labcities.id)
+    static async getSubCitiesByCityId(cityId){
+        const query = `
+            SELECT
+                sc.id,
+                sc.city_id,
+                sc.sub_city_name
+            FROM lab_sub_cities sc
+            INNER JOIN labcities lc ON lc.id = sc.city_id AND lc.isActive = 1
+            WHERE sc.city_id = :cityId
+            ORDER BY sc.sub_city_name ASC;
+        `;
+        return sequelizeDB1.query(query, {
+            replacements: { cityId },
+            type: QueryTypes.SELECT
+        });
+    }
+
     static async checkPamentRequired(patientId, companyId){
          const orderCall = `
            SELECT * from worksman_company_list WHERE id = :companyId;

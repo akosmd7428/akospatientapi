@@ -544,6 +544,46 @@ class labTestController {
         }
     }
 
+    // patient company details with flags (is_sub_city, is_pament_required ...)
+    static async getPatientCompanyDetails(req, res){
+        try {
+            const patientId = req.user.id;
+            const company = await LabTestService.getPatientCompanyDetails(patientId);
+            if(!company){
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "Company not found for this patient");
+            }
+            const data = {
+                ...company,
+                is_sub_city: Number(company.is_sub_city) === 1 ? 1 : 0,
+                is_pament_required: Number(company.is_pament_required) === 1 ? 1 : 0,
+                is_domain_check: Number(company.is_domain_check) === 1 ? 1 : 0,
+                has_portal: Number(company.has_portal) === 1 ? 1 : 0,
+                active: Number(company.active) === 1 ? 1 : 0,
+                enable_email_notification: Number(company.enable_email_notification) === 1 ? 1 : 0,
+                api_access: Number(company.api_access) === 1 ? 1 : 0
+            };
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { data });
+        } catch (error) {
+            console.log(error.message);
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
+    }
+
+    // sub cities based on lab city id
+    static async getSubCitiesByCityId(req, res){
+        try {
+            const cityId = parseInt(req.params.cityId, 10);
+            if(!cityId || cityId < 1){
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Valid city_id is required");
+            }
+            const subCities = await LabTestService.getSubCitiesByCityId(cityId);
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { subCities });
+        } catch (error) {
+            console.log(error.message);
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
+    }
+
     // check payment for call
     static async checkCallPaymentStatus(req,res){
         try {    

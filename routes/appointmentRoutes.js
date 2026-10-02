@@ -15,6 +15,7 @@ router.post('/cancel',validateDataEncryption(), jwtAuth, validateSchema(cancelAp
 router.get('/details/:appointmentId',validateDataEncryption(),jwtAuth, AppointmentController.getAppointmentDetails);
 router.get('/medical-records/:companyId',validateDataEncryption(), jwtAuth, AppointmentController.getMedicalRecords);
 router.get('/talkToDoctor',validateDataEncryption(), jwtAuth, AppointmentController.talkToDoctor);
+router.get('/connect-token',validateDataEncryption(), jwtAuth, AppointmentController.connectToken);
 router.get('/dashboard',validateDataEncryption(),jwtAuth, AppointmentController.dashboard);
 
 router.post('/fetchCallDetails',validateDataEncryption(), jwtAuth, AppointmentController.fetchCallDetails);

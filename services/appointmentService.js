@@ -1,5 +1,5 @@
 const Appointment = require('../models/appointmentModel');
-
+const axios = require('axios');
 const { sequelizeDB1 } = require('../config/sequelize');
 const { QueryTypes } = require('sequelize');
 const { APPOINTMENT_STATUS } = require('../config/secret');
@@ -916,6 +916,24 @@ class AppointmentService {
         });
 
         return results;
+    }
+
+    // Gets a connect-api access token for the logged-in patient from newapi /v1/tokens.
+    // The uuid comes from our DB (never from the browser) and the call carries our server API key.
+    static async getConnectToken(patientId) {
+        const [patient] = await sequelizeDB1.query(
+            'SELECT uuid FROM patient WHERE id = :patientId LIMIT 1',
+            { replacements: { patientId }, type: QueryTypes.SELECT }
+        );
+        if (!patient || !patient.uuid) {
+            return null;
+        }
+        const response = await axios.post(
+            `${process.env.NEWAPI_BASE_URL || 'https://newapi.akosmd.in'}/v1/tokens`,
+            { uuid: patient.uuid, role: 'patient-app' },
+            { headers: { 'X-API-KEY': process.env.NEWAPI_API_KEY || '' }, timeout: 10000 }
+        );
+        return response.data && response.data.access_token ? response.data.access_token : null;
     }
 
     static async getPatientDetails(patientId) {

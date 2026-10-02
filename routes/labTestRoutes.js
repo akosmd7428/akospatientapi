@@ -46,6 +46,8 @@ router.post('/createRedcliffBooking',validateDataEncryption(), LabTestController
 router.post('/redCliffReport', LabTestController.redCliffReport);
 router.post('/fetchRedcliffReport', LabTestController.getRedcliffReport);
 
+router.get('/sub-cities/:cityId',validateDataEncryption(), jwtAuth,LabTestController.getSubCitiesByCityId);
+router.get('/patient-company-details',validateDataEncryption(), jwtAuth,LabTestController.getPatientCompanyDetails);
 router.get('/check-payment-status',validateDataEncryption(), jwtAuth,LabTestController.checkCallPaymentStatus);
 router.post('/create-payment-call',validateDataEncryption(), jwtAuth,LabTestController.postPaymentCall);
 router.post('/verify-call-coupon',validateDataEncryption(), jwtAuth,LabTestController.verifyCallCoupan);

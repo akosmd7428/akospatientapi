@@ -411,6 +411,19 @@ class AppointmentController {
         }
     }
 
+    // connect-api token for the logged-in patient (replaces the browser calling newapi /v1/tokens)
+    static async connectToken(req, res, next) {
+        try {
+            const accessToken = await AppointmentService.getConnectToken(req.user.id);
+            if (!accessToken) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, 'Unable to get call token');
+            }
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { access_token: accessToken });
+        } catch (error) {
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
+    }
+
     static async dashboard(req, res, next) {
         try {
             const patientId = req.user.id;
