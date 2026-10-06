@@ -18,6 +18,28 @@ const { sendSms } = require('./smsService');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
 const LabTestBookingAddress = require('../models/labTestBookingAddress');
 const CareNavigator = require('../models/careNavigatorModel');
+
+const LAB_ORDER_APPROVED_MESSAGE = 'This lab test is already approved by the care navigator. Please contact your care navigator to reschedule it.';
+const LAB_RESCHEDULE_WINDOW_MESSAGE = 'Reschedule is allowed only up to 2 days before the booked date and time. Please contact your care navigator.';
+
+// start of a booked slot: bookingDate "YYYY-MM-DD" (or "DD-MM-YYYY") + bookingTime "8:00 AM to 9:00 AM"
+function bookingStartTime(bookingDate, bookingTime) {
+    if (!bookingDate) return null;
+    let m = String(bookingDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    let year, month, day;
+    if (m) { [, year, month, day] = m; }
+    else if ((m = String(bookingDate).match(/^(\d{2})-(\d{2})-(\d{4})/))) { [, day, month, year] = m; }
+    else return null;
+    let hours = 0, minutes = 0;
+    const t = String(bookingTime || '').match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (t) {
+        hours = Number(t[1]) % 12 + (t[3].toUpperCase() === 'PM' ? 12 : 0);
+        minutes = Number(t[2]);
+    }
+    // slots are Indian times; build the instant in IST whatever the server timezone is
+    const pad = (n) => String(n).padStart(2, '0');
+    return new Date(`${year}-${pad(month)}-${pad(day)}T${pad(hours)}:${pad(minutes)}:00+05:30`);
+}
 const SubscriptionPlanAvail = require('../models/subscriptionPlanAvail');
 
 const PAYU_MONEY_API_URL = DEV_PAYUMONEY_LINK;
@@ -1046,8 +1068,94 @@ ORDER BY
             replacements: { cartId },
             type: QueryTypes.SELECT
         });
-    
+
         return results;
+    }
+
+    // Patient reschedules their own pending/confirmed order. Same booking rules as the cart:
+    // not today or tomorrow, and radiology not on Sunday. Redcliff orders use Redcliff slots, so they are excluded.
+    static async rescheduleLabOrder(orderId, patientId, bookingDate, bookingTime) {
+        const order = await LabOrder.findOne({
+            where: { id: orderId, patientId, isActive: true, isDeleted: false }
+        });
+        if (!order) {
+            return { status: 404, message: 'Lab order not found' };
+        }
+        // 'confirmed' is set by the care navigator's approval (also covers orders approved before approved_by existed)
+        if (order.approvedBy || order.orderStatus === 'confirmed') {
+            return { status: 400, message: LAB_ORDER_APPROVED_MESSAGE };
+        }
+        if (!['pending', 'confirmed', 'Payment Completed'].includes(order.orderStatus)) {
+            return { status: 400, message: `A ${order.orderStatus} order cannot be rescheduled` };
+        }
+        if (order.labType === 'Redcliff') {
+            return { status: 400, message: 'This order cannot be rescheduled online' };
+        }
+        // only allowed more than 2 days (48 hours) before the currently booked slot starts
+        const currentStart = bookingStartTime(order.bookingDate, order.bookingTime);
+        if (currentStart && currentStart.getTime() - Date.now() <= 2 * 24 * 60 * 60 * 1000) {
+            return { status: 400, message: LAB_RESCHEDULE_WINDOW_MESSAGE };
+        }
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDate || '')) {
+            return { status: 400, message: 'Valid bookingDate (YYYY-MM-DD) is required' };
+        }
+        const date = new Date(`${bookingDate}T00:00:00`);
+        const minDate = new Date();
+        minDate.setHours(0, 0, 0, 0);
+        minDate.setDate(minDate.getDate() + 2);
+        if (isNaN(date.getTime()) || date < minDate) {
+            return { status: 400, message: 'Booking date must be at least 2 days from today' };
+        }
+
+        const [detail] = await sequelizeDB1.query(
+            "SELECT MAX(mode = 'Radiology') AS hasRadiology FROM labOrderDetails WHERE labOrderId = :orderId",
+            { replacements: { orderId }, type: QueryTypes.SELECT }
+        );
+        const isRadiology = Number(detail?.hasRadiology) === 1;
+        if (isRadiology && date.getDay() === 0) {
+            return { status: 400, message: 'Radiology tests cannot be booked on Sunday' };
+        }
+        const allowedTimes = isRadiology
+            ? ['8:00 AM to 9:00 AM']
+            : ['6:00 AM to 7:00 AM', '6:30 AM to 7:30 AM', '7:00 AM to 8:00 AM', '7:30 AM to 8:30 AM', '8:00 AM to 9:00 AM', '8:30 AM to 9:30 AM', '9:00 AM to 10:00 AM', '9:30 AM to 10:30 AM', '10:00 AM to 11:00 AM', '10:30 AM to 11:30 AM'];
+        if (!allowedTimes.includes(bookingTime)) {
+            return { status: 400, message: 'Please select a valid time slot' };
+        }
+
+        await order.update({ bookingDate, bookingTime, rescheduledBy: patientId });
+        return { status: 200, message: 'Lab test rescheduled successfully', order: { id: order.id, bookingDate, bookingTime } };
+    }
+
+    // sub-city carts have no lab: price each item from connectedLabs by referenceId + type + mode,
+    // taking the lowest active price (same rule the cart uses for package prices)
+    static async getSubCityCartPrices(cartId, patientId) {
+        const query = `
+        SELECT
+            cd.id AS itemId,
+            (
+                SELECT cl.price FROM connectedLabs cl
+                WHERE cl.referenceId = cd.referenceId AND cl.type = cd.type AND cl.mode = cd.mode AND cl.isActive = 1
+                ORDER BY cl.price ASC, cl.id ASC LIMIT 1
+            ) AS price,
+            (
+                SELECT cl.discount FROM connectedLabs cl
+                WHERE cl.referenceId = cd.referenceId AND cl.type = cd.type AND cl.mode = cd.mode AND cl.isActive = 1
+                ORDER BY cl.price ASC, cl.id ASC LIMIT 1
+            ) AS discount
+        FROM
+            cartDetails cd
+        INNER JOIN
+            cart c ON c.id = cd.cartId AND c.patientId = :patientId
+        WHERE
+            cd.cartId = :cartId
+            AND cd.isActive = 1
+            AND cd.isDeleted = 0;
+        `;
+        return sequelizeDB1.query(query, {
+            replacements: { cartId, patientId },
+            type: QueryTypes.SELECT
+        });
     }
 
     static async getCartDetailsByPatientId(patientId) {
@@ -1574,6 +1682,7 @@ ORDER BY
     p.email,
     p.dateofbirth,
     p.phone,
+    p.parent_id AS patientParentId,
 
     /* Check previous successful order */
     CASE
@@ -1685,6 +1794,7 @@ WHERE
                 patientCompanyId,
                 is_pament_required,
                 alreadyOrdered,
+                patientParentId,
                 state,
                 city,
                 zip_code,
@@ -1751,7 +1861,8 @@ WHERE
                     createdAt: detailCreatedAt,
                     updatedAt: detailUpdatedAt,                  
                    // isFree : is_pament_required === 1 ? 0 : companyIdPackageTest === patientCompanyId ? alreadyOrdered === 1 ? 0 : 1  : 0
-                   isFree: is_pament_required === 1 ? 0 : alreadyOrdered === 1 ? 0 : companyIdPackageTest === patientCompanyId ? 1 : 0
+                   // dependents (patient.parent_id > 0) always pay, even for the company's assigned package
+                   isFree: Number(patientParentId) > 0 ? 0 : is_pament_required === 1 ? 0 : alreadyOrdered === 1 ? 0 : companyIdPackageTest === patientCompanyId ? 1 : 0
 
                 });                
             }
@@ -1987,16 +2098,17 @@ WHERE
                     lo.bookingDate,
                     lo.bookingTime,
                     lo.orderStatus,
-                    lo.labReportURL
-                FROM 
+                    lo.labReportURL,
+                    lo.labType,
+                    lo.approved_by AS approvedBy
+                FROM
                     labOrders lo
-                JOIN 
+                JOIN
                     labOrderDetails lod ON lo.id = lod.labOrderId
-                JOIN 
+                LEFT JOIN
                     labs l ON lo.labId = l.id
-                WHERE 
+                WHERE
                     lo.patientId = :patientId
-                    AND lo.isPaid = 1
                     AND lo.isActive = true
                     AND lo.isDeleted = false
                     AND lod.isActive = true
@@ -2053,15 +2165,18 @@ WHERE
                     lo.bookingDate,
                     lo.bookingTime,
                     lo.orderStatus,
-                    lo.labReportURL
-                FROM 
+                    lo.labReportURL,
+                    COALESCE(MAX(c.is_sub_city), 0) AS is_sub_city
+                FROM
                     labOrders lo
-                JOIN 
+                JOIN
                     labOrderDetails lod ON lo.id = lod.labOrderId
-                JOIN 
+                LEFT JOIN
                     labs l ON lo.labId = l.id
-                JOIN 
+                JOIN
                     patient p ON lo.patientId = p.id
+                LEFT JOIN
+                    worksman_company_list c ON c.id = p.companyId
                 WHERE `;
                 if(status == 'pending'){ 
                     query += ` ( lo.orderStatus = :status OR lo.orderStatus = 'Payment Completed' ) `;
@@ -3206,7 +3321,7 @@ WHERE
                 sc.city_id,
                 sc.sub_city_name
             FROM lab_sub_cities sc
-            INNER JOIN labcities lc ON lc.id = sc.city_id AND lc.isActive = 1
+            INNER JOIN labCities lc ON lc.id = sc.city_id AND lc.isActive = 1
             WHERE sc.city_id = :cityId
             ORDER BY sc.sub_city_name ASC;
         `;
@@ -3214,6 +3329,113 @@ WHERE
             replacements: { cityId },
             type: QueryTypes.SELECT
         });
+    }
+
+    // active labs of the patient's company that offer every package in the order and have
+    // a branch in the given city (matched by city name, same as the patient booking flow),
+    // with each package's price at that lab (total = price - discount, same as the patient cart)
+    static async getLabsForOrderPackages(orderId, labCityId){
+        const query = `
+            SELECT
+                l.id AS labId,
+                l.labName,
+                l.description AS labDescription,
+                l.labAddress,
+                lod.referenceId AS packageId,
+                MAX(lod.name) AS packageName,
+                MIN(cl.price) AS price,
+                MIN(cl.price - COALESCE(cl.discount, 0)) AS totalPrice
+            FROM labOrders lo
+            JOIN patient p ON p.id = lo.patientId
+            JOIN labOrderDetails lod ON lod.labOrderId = lo.id
+                AND lod.type = 'Package'
+                AND lod.isActive = 1
+                AND lod.isDeleted = 0
+            JOIN connectedLabs cl ON cl.referenceId = lod.referenceId
+                AND cl.type = 'Package'
+                AND cl.mode = lod.mode
+                AND cl.companyId = p.companyId
+                AND cl.isActive = 1
+            JOIN labs l ON l.id = cl.labId AND l.isActive = 1
+            WHERE lo.id = :orderId
+            GROUP BY l.id, l.labName, l.description, l.labAddress, lod.referenceId
+            ORDER BY l.labName ASC, packageName ASC;
+        `;
+        const branchQuery = `
+            SELECT
+                lb.id,
+                lb.labId,
+                lb.labCityId,
+                lb.branchName,
+                lb.branchAddress
+            FROM labBranches lb
+            JOIN labCities lc ON lc.id = lb.labCityId AND lc.isActive = 1
+            WHERE lb.isActive = 1
+                AND lc.cityName = (SELECT cityName FROM labCities WHERE id = :labCityId)
+            ORDER BY lb.branchName ASC;
+        `;
+        const [rows, branches] = await Promise.all([
+            sequelizeDB1.query(query, {
+                replacements: { orderId },
+                type: QueryTypes.SELECT
+            }),
+            labCityId ? sequelizeDB1.query(branchQuery, {
+                replacements: { labCityId },
+                type: QueryTypes.SELECT
+            }) : []
+        ]);
+
+        const totalPackages = new Set(rows.map(row => row.packageId)).size;
+        const labs = new Map();
+        rows.forEach(row => {
+            if (!labs.has(row.labId)) {
+                labs.set(row.labId, {
+                    labId: row.labId,
+                    labName: row.labName,
+                    labDescription: row.labDescription,
+                    labAddress: row.labAddress,
+                    price: 0,
+                    discount: 0,
+                    totalPrice: 0,
+                    packages: [],
+                    branches: branches.filter(branch => Number(branch.labId) === Number(row.labId))
+                });
+            }
+            const lab = labs.get(row.labId);
+            const price = Number(row.price) || 0;
+            const totalPrice = Number(row.totalPrice) || 0;
+            lab.packages.push({
+                packageId: row.packageId,
+                packageName: row.packageName,
+                price,
+                discount: price - totalPrice,
+                totalPrice
+            });
+            lab.price += price;
+            lab.discount += price - totalPrice;
+            lab.totalPrice += totalPrice;
+        });
+        // only labs that offer every package in the order and have a branch in the city
+        return [...labs.values()].filter(lab => lab.packages.length === totalPackages && lab.branches.length > 0);
+    }
+
+    // city and sub city the patient chose for the order
+    static async getOrderLocation(orderId){
+        const query = `
+            SELECT
+                lo.labCityName,
+                (SELECT MIN(lc.id) FROM labCities lc WHERE lc.cityName = lo.labCityName AND lc.isActive = 1) AS labCityId,
+                lo.sub_city_id AS subCityId,
+                lo.labBranchId
+            FROM labOrders lo
+            WHERE lo.id = :orderId
+            LIMIT 1;
+        `;
+        const [location] = await sequelizeDB1.query(query, {
+            replacements: { orderId },
+            type: QueryTypes.SELECT
+        });
+        return location || null;
     }
 
     static async checkPamentRequired(patientId, companyId){

@@ -22,11 +22,13 @@ router.get('/prescription/:patientId',validateDataEncryption(), jwtAuth, LabTest
 router.delete('/prescription/:prescriptionId', jwtAuth, LabTestController.deletePrescription);
 router.post('/order',validateDataEncryption(),jwtAuth, LabTestController.createLabOrder);
 router.get('/orders/:orderId', jwtAuth, LabTestController.getLabOrdersByPatient);
+router.put('/order/reschedule',validateDataEncryption(), jwtAuth, LabTestController.rescheduleLabOrder);
 router.put('/order',validateDataEncryption(), LabTestController.updateLabOrder);
-router.get('/list/:patientId',validateDataEncryption(), LabTestController.getLabOrders);
+router.get('/list/:patientId',validateDataEncryption(), jwtAuth, LabTestController.getLabOrders);
 router.delete('/cartRemove/:cartId',validateDataEncryption(), jwtAuth, LabTestController.removeCart);
 router.put('/cart',validateDataEncryption(), jwtAuth, LabTestController.updateLabId);
 router.get('/labDetail/:cartId',validateDataEncryption(), jwtAuth, LabTestController.getLabDetail);
+router.get('/cart/sub-city-prices/:cartId',validateDataEncryption(), jwtAuth, LabTestController.getSubCityCartPrices);
 router.post('/purchaseLabTest',validateDataEncryption(), jwtAuth, LabTestController.purchaseLabTest);
 router.post('/purchaseLabTestMobile',validateDataEncryption(), jwtAuth, LabTestController.purchaseLabTestMobile);
 

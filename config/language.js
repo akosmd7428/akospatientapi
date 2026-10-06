@@ -115,6 +115,8 @@ const messages = {
     sso_code_generated: "SSO login code generated successfully.",
     sso_patient_not_found: "No patient found with the provided patient id.",
     sso_invalid_code: "Invalid or expired SSO login code.",
+    connect_code_generated: "Connect access code generated successfully.",
+    connect_invalid_code: "Invalid or expired connect access code.",
     invaliddomain: "Domain is in-valid.",
 };
 

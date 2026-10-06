@@ -17,7 +17,8 @@ class labTestController {
 
     static async uploadPrescription(req, res) {
         try {
-            const { prescriptionFile, notes, patientId } = req.body;
+            const { prescriptionFile, notes } = req.body;
+            const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
 
             const prescription = await LabTestService.uploadPrescription({ prescriptionFile, notes, patientId });
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.prescriptionUpload, { prescription });
@@ -29,7 +30,8 @@ class labTestController {
     static async addToCart(req, res) {
         try {
            // console.log(req.body,"card Item");
-            const { type, mode, referenceId, patientId, companyId,labId,labType,code} = req.body; 
+            const { type, mode, referenceId, companyId,labId,labType,code} = req.body;
+            const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
 
             const cartItem = await LabTestService.addToCart({ patientId, type, mode, referenceId, companyId, labId, labType, code });
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.itemAddedToCart, { cartItem });
@@ -49,7 +51,8 @@ class labTestController {
 
     static async getLabDetailsByCart(req, res) {
         try {
-            const { companyId, patientId, cityName } = req.body;
+            const { companyId, cityName } = req.body;
+            const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
 
             const labDetails = await LabTestService.getLabDetailsByCart(companyId, patientId, cityName);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.labDetailsFetched, { labDetails });
@@ -60,7 +63,7 @@ class labTestController {
 
     static async getCartDetailsByPatientId(req, res) {
         try {
-            const { patientId } = req.body;
+            const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
 
             const cartDetails = await LabTestService.getCartDetailsByPatientId(patientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.cartDetailsFetched, { cartDetails });
@@ -71,7 +74,7 @@ class labTestController {
 
     static async getUnpaidLabForItem(req, res) {
         try {
-            const { patientId } = req.body;
+            const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
 
             const cartDetails = await LabTestService.getUnpaidLabDetails(patientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.cartDetailsFetched, { cartDetails });
@@ -141,7 +144,7 @@ class labTestController {
 
     static async getPrescriptionUrl(req, res) {
         try {
-            const { patientId } = req.params;
+            const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
             const prescription = await LabTestService.getPrescriptionUrl(patientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.prescriptionFetched, { prescription });
         } catch (error) {
@@ -161,7 +164,7 @@ class labTestController {
 
     static async createLabOrder(req, res) {
         try {
-            const labOrder = await LabTestService.createLabOrder(req.body);
+            const labOrder = await LabTestService.createLabOrder({ ...req.body, patientId: req.user.id }); // always the logged-in user, never a patientId sent by the app
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.orderCreated, { labOrder });
         } catch (error) {
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
@@ -202,12 +205,14 @@ class labTestController {
 
     static async updateLabId(req, res) {
 
-        const { cartId, labId, labBranchId, labCityName } = req.body;
+        const { cartId, labId, labBranchId, labCityName, subCityId } = req.body;
         try {
             const updateData = {
                 "labId": labId,
                 "labBranchId": labBranchId,
-                "labCityName" : labCityName
+                "labCityName" : labCityName,
+                // set for sub-city radiology carts, cleared when a lab/branch is chosen
+                "subCityId": subCityId ? Number(subCityId) : null
             }
             const result = await LabTestService.updateCart(cartId, updateData);
             if (result[0] === 0) {
@@ -220,7 +225,7 @@ class labTestController {
     }    
 
     static async getLabOrders(req, res) {
-        const patientId = req.params.patientId;
+        const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
     
         try {
             const data = await LabTestService.getLabOrdersByPatient(patientId);
@@ -243,6 +248,38 @@ class labTestController {
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     };
+
+    // patient reschedules their own booked lab test
+    static async rescheduleLabOrder(req, res) {
+        try {
+            const orderId = parseInt(req.body.orderId, 10);
+            if (!orderId || orderId < 1) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Valid orderId is required");
+            }
+            const { bookingDate, bookingTime } = req.body;
+            const result = await LabTestService.rescheduleLabOrder(orderId, req.user.id, bookingDate, bookingTime);
+            if (result.status !== 200) {
+                return CommonHelper.sendError(res, result.status, result.message);
+            }
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, result.message, { labOrder: result.order });
+        } catch (error) {
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
+    }
+
+    // item prices for a sub-city cart (no lab selected)
+    static async getSubCityCartPrices(req, res) {
+        try {
+            const cartId = parseInt(req.params.cartId, 10);
+            if (!cartId || cartId < 1) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Valid cartId is required");
+            }
+            const cartDetails = await LabTestService.getSubCityCartPrices(cartId, req.user.id);
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { cartDetails });
+        } catch (error) {
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
+    }
 
     static async paymentStatus(req, res){
         //console.log(req.body,"==== payment");
@@ -324,7 +361,8 @@ class labTestController {
     
     static async purchaseLabTest(req, res) {
         try {
-            const { patientId, totalPrice, cartId, orderId } = req.body;
+            const { totalPrice, cartId, orderId } = req.body;
+            const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
             const uniqueBookingId = Math.floor(10000 + Math.random() * 90000);
             const labOrderDetail = await LabOrder.findOne({ 
                 where: { id: orderId },
@@ -401,7 +439,8 @@ class labTestController {
 
     static async purchaseLabTestMobile(req, res) {
         try {
-            const { patientId, totalPrice, cartId, orderId } = req.body;
+            const { totalPrice, cartId, orderId } = req.body;
+            const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
             const uniqueBookingId = Math.floor(10000 + Math.random() * 90000);
             const labOrderDetail = await LabOrder.findOne({ 
                 where: { id: orderId },

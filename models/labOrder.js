@@ -22,7 +22,7 @@ LabOrder.init({
     },
     labId: {
         type: DataTypes.INTEGER,
-        allowNull: false
+        allowNull: true
     },
     labCityName: {
         type: DataTypes.STRING,
@@ -31,6 +31,11 @@ LabOrder.init({
     labBranchId: {
         type: DataTypes.INTEGER,
         allowNull: true
+    },
+    subCityId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: 'sub_city_id'
     },
     price: {
         type: DataTypes.DECIMAL,
@@ -92,6 +97,18 @@ LabOrder.init({
     availableSlotId: {
         type: DataTypes.INTEGER,
         allowNull: true
+    },
+    // patient id that last rescheduled the order from the patient portal
+    rescheduledBy: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: 'rescheduled_by'
+    },
+    // care navigator id that approved (confirmed) the order; patients cannot reschedule once set
+    approvedBy: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: 'approved_by'
     },
     is_migrated: {
         type: DataTypes.BOOLEAN,

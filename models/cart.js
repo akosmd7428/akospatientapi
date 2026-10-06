@@ -20,6 +20,11 @@ Cart.init({
         type: DataTypes.STRING,
         allowNull: true
     },
+    subCityId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: 'sub_city_id'
+    },
      labType: {
         type: DataTypes.STRING,
         allowNull: true

@@ -301,10 +301,40 @@ class CareNavigatorController {
 
     static async updateLabOrder(req, res) {
 
-        const { orderId, status } = req.body;
+        const { orderId, status, labId, labCityId, subCityId, labBranchId } = req.body;
         // try {
             const updateData = {
                 "orderStatus": status
+            }
+            // remember who approved, so the patient can no longer reschedule it themselves
+            if (status === 'confirmed') {
+                updateData.approvedBy = req.user.id;
+            }
+            // sub city orders are booked without a lab; care navigator assigns lab, city, sub city and branch on approval
+            if (labId && status === 'confirmed') {
+                const cities = await labTestService.getAllActiveCities();
+                const city = cities.find(item => Number(item.id) === Number(labCityId));
+                if (!city) {
+                    return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Selected city is not available");
+                }
+                const allowedLabs = await labTestService.getLabsForOrderPackages(orderId, labCityId);
+                const lab = allowedLabs.find(item => Number(item.labId) === Number(labId));
+                if (!lab) {
+                    return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Selected lab is not available for this package in this city");
+                }
+                if (!lab.branches.some(item => Number(item.id) === Number(labBranchId))) {
+                    return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Selected branch does not belong to this lab and city");
+                }
+                if (subCityId) {
+                    const subCities = await labTestService.getSubCitiesByCityId(labCityId);
+                    if (!subCities.some(item => Number(item.id) === Number(subCityId))) {
+                        return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Selected sub city does not belong to this city");
+                    }
+                }
+                updateData.labId = labId;
+                updateData.labCityName = city.cityName;
+                updateData.subCityId = subCityId || null;
+                updateData.labBranchId = labBranchId;
             }
             const result = await labTestService.updateLabOrder(orderId, updateData);
             if (result[0] === 0) {
@@ -314,6 +344,50 @@ class CareNavigatorController {
         // } catch (error) {
         //     return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         // }
+    }
+
+    static async getOrderLabs(req, res) {
+        try {
+            const orderId = parseInt(req.params.orderId, 10);
+            if (!orderId || orderId < 1) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Valid orderId is required");
+            }
+            // labs are listed for the requested city, or the order's own city by default
+            const location = await labTestService.getOrderLocation(orderId);
+            const labCityId = parseInt(req.query.labCityId, 10) || location?.labCityId || null;
+            const labs = labCityId ? await labTestService.getLabsForOrderPackages(orderId, labCityId) : [];
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, {
+                labs,
+                labCityId,
+                labCityName: location?.labCityName || null,
+                subCityId: location?.subCityId || null,
+                labBranchId: location?.labBranchId || null
+            });
+        } catch (error) {
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
+    }
+
+    static async getLabCities(req, res) {
+        try {
+            const cities = await labTestService.getAllActiveCities();
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { cities });
+        } catch (error) {
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
+    }
+
+    static async getSubCities(req, res) {
+        try {
+            const cityId = parseInt(req.params.cityId, 10);
+            if (!cityId || cityId < 1) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Valid cityId is required");
+            }
+            const subCities = await labTestService.getSubCitiesByCityId(cityId);
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { subCities });
+        } catch (error) {
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
     }
 
     static async uploadLabReport(req, res) {

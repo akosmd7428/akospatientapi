@@ -18,6 +18,9 @@ router.get('/labTests',validateDataEncryption(), jwtAuthCareNavigator, CareNavig
 router.get('/dashboard', validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.dashboard);
 router.get('/prescriptions',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.prescriptions);
 router.post('/updateLabOrder',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.updateLabOrder);
+router.get('/order-labs/:orderId',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.getOrderLabs);
+router.get('/lab-cities',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.getLabCities);
+router.get('/sub-cities/:cityId',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.getSubCities);
 router.post('/uploadLabReport',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.uploadLabReport);
 router.get('/getPackages',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.getPackages);
 router.post('/updateAppointment',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.updateAppointment);

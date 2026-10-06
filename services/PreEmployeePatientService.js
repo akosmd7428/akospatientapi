@@ -852,7 +852,7 @@ class PreEmployeePatientService {
                 FROM 
                     patient as p       
                 WHERE 
-                    employer_id = :companyId`; 
+                    employer_id = :companyId AND is_active = 1`; 
                 if ((from_date !== undefined && from_date !== null) && (to_date !== undefined && to_date !==null)) {
                     query += ` AND p.created_at BETWEEN :fromDate AND :toDate `;
                 }  

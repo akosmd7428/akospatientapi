@@ -35,6 +35,8 @@ const AppointmentService = require('./services/appointmentService');
 const hrRoutes = require('./routes/hrRoutes');
 const vitalMonitoringRoutes = require('./routes/vitalMonitoringRoutes');
 const migrationRoutes = require('./routes/migrationRoutes');
+const connectAccessRoutes = require('./routes/connectAccessRoutes');
+const portalModuleRoutes = require('./routes/portalModuleRoutes');
 const cors = require('cors');
 
 const app = express();
@@ -92,6 +94,8 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/hr', hrRoutes);
 app.use('/api/vital-monitoring', vitalMonitoringRoutes);
 app.use('/api/migration', migrationRoutes);
+app.use('/api/connect-access', connectAccessRoutes);
+app.use('/api/portal-modules', portalModuleRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
