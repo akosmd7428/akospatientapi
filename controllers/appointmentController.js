@@ -411,16 +411,17 @@ class AppointmentController {
         }
     }
 
-    // connect-api token for the logged-in patient (replaces the browser calling newapi /v1/tokens)
+    // connect-api token for the logged-in patient (replaces the browser calling newapi /v1/tokens).
+    // Sent unencrypted, the same as the newapi response it replaces: { access_token }
     static async connectToken(req, res, next) {
         try {
             const accessToken = await AppointmentService.getConnectToken(req.user.id);
             if (!accessToken) {
-                return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, 'Unable to get call token');
+                return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, 'Unable to get call token');
             }
-            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { access_token: accessToken });
+            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { access_token: accessToken });
         } catch (error) {
-            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
 
