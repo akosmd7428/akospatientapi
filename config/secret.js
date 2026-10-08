@@ -33,6 +33,20 @@ const REDCLIFF_BASE_URL = process.env.REDCLIFF_URL;
 const REDCLIFF_COOKIE = process.env.REDCLIFF_COOKIE;
 const REDCLIFF_KEY = process.env.REDCLIFF_KEY;
 
+// encryption keys and tokens, never hard-code these in the code
+const DATA_ENCRYPTION_KEY = process.env.DATA_ENCRYPTION_KEY;
+const DATA_ENCRYPTION_IV = process.env.DATA_ENCRYPTION_IV;
+const AES_SECRET_KEY = process.env.AES_SECRET_KEY;
+const PRESCRIPTION_LINK_SECRET = process.env.PRESCRIPTION_LINK_SECRET;
+const BITLY_ACCESS_TOKEN = process.env.BITLY_ACCESS_TOKEN;
+
+// stop the app at startup when a required security value is missing from .env
+const REQUIRED_SECURITY_ENV = ['JWT_SECRET', 'DATA_ENCRYPTION_KEY', 'DATA_ENCRYPTION_IV', 'AES_SECRET_KEY', 'PRESCRIPTION_LINK_SECRET'];
+const missingSecurityEnv = REQUIRED_SECURITY_ENV.filter(name => !process.env[name]);
+if (missingSecurityEnv.length) {
+    throw new Error(`Missing required security values in .env: ${missingSecurityEnv.join(', ')}`);
+}
+
 const APPOINTMENT_STATUS = {
     UPCOMING: "Upcoming",
     COMPLETED: "Completed",
@@ -72,5 +86,10 @@ module.exports = {
     SMTP_SENDER_FROM,
     REDCLIFF_BASE_URL,
     REDCLIFF_COOKIE,
-    REDCLIFF_KEY
+    REDCLIFF_KEY,
+    DATA_ENCRYPTION_KEY,
+    DATA_ENCRYPTION_IV,
+    AES_SECRET_KEY,
+    PRESCRIPTION_LINK_SECRET,
+    BITLY_ACCESS_TOKEN
 };

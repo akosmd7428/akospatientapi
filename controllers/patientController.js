@@ -6,7 +6,7 @@ const CommonHelper = require('../helpers/commonHelper');
 const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
 const { getFirstAndLastName } = require('../config/utils');
-const { JWT_SECRET, PATIENT_FRONTEND_URL } = require('../config/secret');
+const { JWT_SECRET, PATIENT_FRONTEND_URL, PRESCRIPTION_LINK_SECRET } = require('../config/secret');
 const AppointmentService = require('../services/appointmentService');
 const Doctor = require('../models/doctorModel');
 const { generatePrescription }  = require('../helpers/generatePrescription');
@@ -284,7 +284,7 @@ class PatientController {
 
     static async getPrescriptionDetail(req, res) {
         let { email, token, cid } = req.query;
-        const secretKey = "8D3f7c1A9bE4xT2zLwQ5mR8oNpV6yJ1";
+        const secretKey = PRESCRIPTION_LINK_SECRET;
         let patientId;
         let patientDetails;
         let patientDetail;

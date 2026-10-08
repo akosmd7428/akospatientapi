@@ -5,7 +5,7 @@ const CareNavigator = require('../models/careNavigatorModel');
 const Patient = require('../models/patientModel');
 const AppointmentService = require('../services/appointmentService');
 const PatientService = require('../services/patientService');
-const { APPOINTMENT_STATUS, SEND_CONTACT_EMAIL_TO_ADMIN } = require('../config/secret');
+const { APPOINTMENT_STATUS, SEND_CONTACT_EMAIL_TO_ADMIN, PRESCRIPTION_LINK_SECRET } = require('../config/secret');
 const labTestService = require('../services/labTestService');
 const HelpService = require('../services/helpService');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
@@ -78,7 +78,7 @@ class CareNavigatorController {
                     callDuration = new Date(durationMs).toISOString().substr(11, 8); // HH:mm:ss
                     appointmentStatus = APPOINTMENT_STATUS.COMPLETED;
                     if (prescription == null) {
-                        const secretKey = "8D3f7c1A9bE4xT2zLwQ5mR8oNpV6yJ1";
+                        const secretKey = PRESCRIPTION_LINK_SECRET;
                         const xorEncrypt = (text, key) => {
                             let encrypted = '';
                             for (let i = 0; i < text.length; i++) {

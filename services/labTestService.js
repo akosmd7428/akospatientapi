@@ -1684,6 +1684,15 @@ ORDER BY
     p.phone,
     p.parent_id AS patientParentId,
 
+    /* isFree of the company package (NULL when the item is not a company package) */
+    (
+        SELECT MIN(ccp.isFree)
+        FROM connectedCompaniesLabPackages ccp
+        WHERE ccp.companyId = lod.companyIdPackageTest
+          AND ccp.labPackageId = lod.referenceId
+          AND lod.type = 'Package'
+    ) AS packageIsFree,
+
     /* Check previous successful order */
     CASE
         WHEN EXISTS (
@@ -1795,6 +1804,7 @@ WHERE
                 is_pament_required,
                 alreadyOrdered,
                 patientParentId,
+                packageIsFree,
                 state,
                 city,
                 zip_code,
@@ -1862,7 +1872,8 @@ WHERE
                     updatedAt: detailUpdatedAt,                  
                    // isFree : is_pament_required === 1 ? 0 : companyIdPackageTest === patientCompanyId ? alreadyOrdered === 1 ? 0 : 1  : 0
                    // dependents (patient.parent_id > 0) always pay, even for the company's assigned package
-                   isFree: Number(patientParentId) > 0 ? 0 : is_pament_required === 1 ? 0 : alreadyOrdered === 1 ? 0 : companyIdPackageTest === patientCompanyId ? 1 : 0
+                   // company package with isFree = 0 is always paid; isFree = 1 keeps the existing checks
+                   isFree: packageIsFree !== null && Number(packageIsFree) === 0 ? 0 : Number(patientParentId) > 0 ? 0 : is_pament_required === 1 ? 0 : alreadyOrdered === 1 ? 0 : companyIdPackageTest === patientCompanyId ? 1 : 0
 
                 });                
             }

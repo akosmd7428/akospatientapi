@@ -1,9 +1,10 @@
 //import crypto from 'crypto';
 const crypto = require('crypto');
+const { DATA_ENCRYPTION_KEY, DATA_ENCRYPTION_IV } = require('./secret');
 // Define the encryption method and key
 const algorithm = 'aes-256-cbc'; // AES-256 requires a 32-byte key
-const key = 'akosmdtechpatientportalapsfghjkf';//crypto.randomBytes(32); // Generate a random 32-byte key
-const iv = '1dfdb8cce5e9b76f25d3396b0b550da7';//crypto.randomBytes(16); // Generate a random 16-byte IV
+const key = DATA_ENCRYPTION_KEY; // 32 characters, from .env
+const iv = DATA_ENCRYPTION_IV; // 16 bytes as hex, from .env
 const ivBuffer = Buffer.from(iv, 'hex');
 // Function to encrypt data
 function encryptData(plaintext) {

@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const BITLY_ACCESS_TOKEN = '4c857ab70e9cfc90f1889f44b7024da648c54b3c';
+const { BITLY_ACCESS_TOKEN } = require('../config/secret');
 
 async function shortenUrl(longUrl) {
     try {
