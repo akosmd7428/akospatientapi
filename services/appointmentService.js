@@ -8,6 +8,7 @@ const { Op } = require('sequelize');
 const Patient = require('../models/patientModel');
 const Doctor = require('../models/doctorModel');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
+const EmailTemplates = require('../helpers/emailTemplates');
 const { sendSms } = require('./smsService');
 const CareNavigator = require('../models/careNavigatorModel');
 const NotificationService = require('./notificationService');
@@ -22,7 +23,7 @@ class AppointmentService {
            // patient.email = "mohan.pal@akosmdtech.com"
             const patientName = patient.first_name +' '+patient.last_name;
             //send email to patient
-            const email_service = await emailHelperSMTP(appointment.patientId, patient.email, 'Appointment Requested', `<p>Hi ${patientName}, <br/></br>Your appointment with AkosMD is requested for ${appointment.date} at ${appointment.time} and awaiting confirmation. We will update you once confirmed. If you need to reschedule, contact us at +91-8595461929.<br/>Looking forward to your appointment! <br/><br/>Thank you!<br/>Team AkosMD</p>`);                
+            const email_service = await emailHelperSMTP(appointment.patientId, patient.email, ...Object.values(EmailTemplates.appointmentRequested({ patientName, date: appointment.date, time: appointment.time })));                
            // console.log(email_service);
             // Create SMS messages with dynamic content
             const patientSMSMsg = `Hi ${patientName}, your requested appointment with AkosMD for ${appointment.date} at ${appointment.time} is awaiting confirmation, We will update you upon confirmation.`;
@@ -402,9 +403,9 @@ class AppointmentService {
             const doctorName = doctor.name; 
 
             //Create and send email to patient and doctor 
-            await emailHelperSMTP(appointment.patientId, patient.email, 'Call Cancelled', `<p>Hi ${patientName}, <br/></br>We regret to inform you that your telehealth call scheduled for ${appointment.date} at ${appointment.time} has been cancelled. Please contact us at +91-8595461929 to reschedule or for any further assistance. We apologize for the inconvenience and appreciate your understanding. <br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            await emailHelperSMTP(appointment.patientId, patient.email, ...Object.values(EmailTemplates.callCancelledPatient({ patientName, date: appointment.date, time: appointment.time })));      
         
-            await emailHelperSMTP(appointment.doctorId, doctor.email, 'Call Cancelled', `<p>Hi ${doctorName}, <br/></br>The telehealth call with ${patientName} scheduled for ${appointment.date} at ${appointment.time} has been cancelled. Please check your schedule for any adjustments. If you need further details or have any questions, please contact us at +91-8595461929.<br/><br/>Thank you!<br/>Team AkosMD</p>`);  
+            await emailHelperSMTP(appointment.doctorId, doctor.email, ...Object.values(EmailTemplates.callCancelledDoctor({ doctorName, patientName, date: appointment.date, time: appointment.time })));  
             
             // Create SMS messages with dynamic content
             const patientSMSMsg = `Hi ${patientName}, we regret to inform you that your call scheduled for ${appointment.date} at ${appointment.time} has been cancelled. Team AkosMD`;
@@ -467,9 +468,9 @@ class AppointmentService {
                 const patientName = patient.first_name +' '+patient.last_name;
                 const doctorName = doctor.name; 
                 //Create and send email to patient and doctor 
-                await emailHelperSMTP(appointment.patientId, patient.email, 'Call Scheduled', `<p>Hi ${patientName}, <br/></br>Your telehealth call with AkosMD has been confirmed for ${appointment.date} at ${appointment.time}. Please make sure to be available at that time and have a stable internet connection. If you have any questions or need to make changes, please contact us at +91-8595461929. See you then! <br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+                await emailHelperSMTP(appointment.patientId, patient.email, ...Object.values(EmailTemplates.callScheduledPatient({ patientName, date: appointment.date, time: appointment.time })));      
                 
-                await emailHelperSMTP(appointment.doctorId, doctor.email, 'Consultation Booked', `<p>Hi ${doctorName}, <br/></br>A new telehealth consultation has been scheduled with ${patientName} on ${appointment.date} at ${appointment.time}. Please check your schedule and ensure you are prepared for the consultation. If you need to adjust the timing or have any questions, please contact us at +91-8595461929.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+                await emailHelperSMTP(appointment.doctorId, doctor.email, ...Object.values(EmailTemplates.consultationBookedDoctor({ doctorName, patientName, date: appointment.date, time: appointment.time })));      
 
                 // Create SMS messages with dynamic content
                 const patientSMSMsg = `Hi ${patientName}, your telehealth call with AkosMD has been confirmed for ${appointment.date} at ${appointment.time}. Reach out to us if you have any query.`;
@@ -507,9 +508,9 @@ class AppointmentService {
                 const doctorName = doctor.name; 
 
                 //Create and send email to patient and doctor 
-                await emailHelperSMTP(appointment.patientId, patient.email, 'Call Cancelled', `<p>Hi ${patientName}, <br/></br>We regret to inform you that your telehealth call scheduled for ${appointment.date} at ${appointment.time} has been cancelled. Please contact us at +91-8595461929 to reschedule or for any further assistance. We apologize for the inconvenience and appreciate your understanding. <br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+                await emailHelperSMTP(appointment.patientId, patient.email, ...Object.values(EmailTemplates.callCancelledPatient({ patientName, date: appointment.date, time: appointment.time })));      
             
-                await emailHelperSMTP(appointment.doctorId, doctor.email, 'Call Cancelled', `<p>Hi ${doctorName}, <br/></br>The telehealth call with ${patientName} scheduled for ${appointment.date} at ${appointment.time} has been cancelled. Please check your schedule for any adjustments. If you need further details or have any questions, please contact us at +91-8595461929.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+                await emailHelperSMTP(appointment.doctorId, doctor.email, ...Object.values(EmailTemplates.callCancelledDoctor({ doctorName, patientName, date: appointment.date, time: appointment.time })));      
 
                 // Create SMS messages with dynamic content
                 const patientSMSMsg = `Hi ${patientName}, we regret to inform you that your call scheduled for ${appointment.date} at ${appointment.time} has been cancelled. Team AkosMD`;

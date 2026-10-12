@@ -4,6 +4,7 @@ const { generateOtp, validateOtp } = require('../helpers/otpHelper');
 const { messages } = require('../config/language');
 const crypto = require('crypto');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
+const EmailTemplates = require('../helpers/emailTemplates');
 const CareNavigator = require('../models/careNavigatorModel');
 const Hr = require('../models/hrModel');
 
@@ -11,24 +12,12 @@ class ForgotPasswordService {
   static async sendOtp(email, role) {
 
     const otp = generateOtp(email);
-    const html = `
-    <html>
-    <body>
-        <h2>Your OTP Code</h2>
-        <p>Hello,</p>
-        <p>Here is your One-Time Password (OTP) code:</p>
-        <h1 style="font-size: 24px; color: #007BFF;">${otp}</h1>
-        <p>This OTP is valid for 5 minutes. Please use it within this time frame.</p>
-        <p>If you did not request this OTP, please ignore this email.</p>
-        <p>Thank you!</p>
-    </body>
-    </html>
-    `;
+    const { subject, html } = EmailTemplates.otpCode({ otp });
   
     if(role == "patient"){
       const patient = await Patient.findOne({ where: { email } });
       if(patient){
-        await emailHelperSMTP(email, email, 'OTP Code', html);
+        await emailHelperSMTP(email, email, subject, html);
         return "OTP sent successfully";
       }else{
         throw new Error("No Patient found with this email");
@@ -38,7 +27,7 @@ class ForgotPasswordService {
     if(role == "careNavigator"){
       const careNavigator = await CareNavigator.findOne({ where: { email } });
       if(careNavigator){
-        await emailHelperSMTP(email, email, 'OTP Code', html);
+        await emailHelperSMTP(email, email, subject, html);
         return "OTP sent successfully";
       }else{
         throw new Error("No Care Navigator found with this email");
@@ -48,7 +37,7 @@ class ForgotPasswordService {
     if(role == "dependent"){
       const connectedCompaniesPatient = await ConnectedCompaniesPatient.findOne({ where: { patientEmail: email } });
       if(connectedCompaniesPatient){
-        await emailHelperSMTP(email, email, 'OTP Code', html);
+        await emailHelperSMTP(email, email, subject, html);
         return "OTP sent successfully";
       }else{
         throw new Error("No Dependent found with this email");
@@ -58,7 +47,7 @@ class ForgotPasswordService {
     if(role == "hr"){     
       const hr = await Hr.findOne({ where: { email } });
       if(hr){
-        await emailHelperSMTP(email, email, 'OTP Code', html);
+        await emailHelperSMTP(email, email, subject, html);
         return "OTP sent successfully";
       }else{
         throw new Error("No Care Navigator found with this email");

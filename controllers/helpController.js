@@ -5,6 +5,7 @@ const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
 const { SEND_CONTACT_EMAIL_TO_ADMIN } = require('../config/secret');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
+const EmailTemplates = require('../helpers/emailTemplates');
 
 class HelpController {
   static async getHelpFaq(req, res, next) {
@@ -25,16 +26,14 @@ class HelpController {
 
       const patient = await HelpService.getPatientDetailsByEmail(email);
 
-      const emailContent = `
-        <p>Patient Details:</p>
-        <p><strong>First Name:</strong> ${patient.first_name}</p>
-        <p><strong>Last Name:</strong> ${patient.last_name}</p>
-        <p><strong>Email:</strong> ${patient.email}</p>
-        <p><strong>Mobile:</strong> ${patient.phone}</p>
-        <p><strong>Message:</strong> ${message}</p>
-      `;
+      const { subject, html } = EmailTemplates.adminRequest({
+          subject: 'Patient Help Request',
+          intro: 'A patient has submitted a help request:',
+          details: [['First Name', patient.first_name], ['Last Name', patient.last_name], ['Email', patient.email], ['Mobile', patient.phone]],
+          message,
+      });
 
-      const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'Patient Help Request', emailContent);
+      const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, subject, html);
 
       return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, msg);
     } catch (error) {

@@ -16,6 +16,7 @@ const PatientDetail = require('../models/patientDetailModel');
 const { Sequelize } = require('sequelize');
 const PatientFamilyHistory = require('../models/patientFamilyHistoryModel');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
+const EmailTemplates = require('../helpers/emailTemplates');
 class PatientController {
 
     static async getPatientProfileDetails(req, res) {
@@ -144,35 +145,8 @@ class PatientController {
                         
                         if(dependent.age > 17 && dependent.id != req.user.id){
                             const profileCompletionLink = `${PATIENT_FRONTEND_URL}/forgot-password?email=${dependent.email}`;
-                            const html = `
-                            <html>
-                                <body style="font-family: Arial, sans-serif; color: #333;">
-                                    <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-                                        <h2 style="text-align: center; color: #007BFF;">You’ve Been Added as a Dependent!</h2>
-                                        
-                                        <p>Hello,</p>
-                                        
-                                        <p>We are pleased to inform you that a patient has added you as a dependent in their account with us.</p>
-                                        
-                                        <p>To complete your profile and ensure you have access to all the necessary features, please take a moment to update your information by clicking on the button below:</p>
-                                        
-                                        <div style="text-align: center; margin: 20px 0;">
-                                            <a target="_blank" href="${profileCompletionLink}" 
-                                            style="display: inline-block; padding: 12px 24px; font-size: 16px; color: #fff; background-color: #007BFF; text-decoration: none; border-radius: 4px;">
-                                                Click Here to Complete Your Profile
-                                            </a>
-                                        </div>
-                                        
-                                        <p>This will help us ensure that we have accurate information and enable us to serve you better.</p>
-                                        
-                                        <p>If you were not expecting this email or have questions, feel free to contact our support team.</p>
-                                        
-                                        <p>Thank you!<br>Team Akos</p>
-                                    </div>
-                                </body>
-                            </html>
-                            `;
-                            emailHelperSMTP(dependent.email, dependent.email, 'Welcome To AKOS', html);
+                            const { subject, html } = EmailTemplates.dependentInvite({ link: profileCompletionLink });
+                            emailHelperSMTP(dependent.email, dependent.email, subject, html);
                         }
                     }else{
                         errorPatient=1;

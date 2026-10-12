@@ -185,6 +185,14 @@ class labTestController {
 
         const { orderId, totalPrice, bookingDate, bookingTime, bookingAddress, slotId, availableSlotId } = req.body;
         try {
+            // only the logged-in patient's own order; 404 (not 403) so other patients' order ids are not revealed
+            const order = await LabOrder.findOne({
+                where: { id: orderId, patientId: req.user.id, isDeleted: false },
+                attributes: ['id'],
+            });
+            if (!order) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
             const updateData = {
                 "totalPrice": totalPrice,
                 "bookingDate": bookingDate,
@@ -363,18 +371,22 @@ class labTestController {
         try {
             const { totalPrice, cartId, orderId } = req.body;
             const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
-            const uniqueBookingId = Math.floor(10000 + Math.random() * 90000);
             const labOrderDetail = await LabOrder.findOne({ 
                 where: { id: orderId },
                 attributes: ['uniqueBookingId', 'paymentStatus', 'orderStatus'],
             });
-            if(labOrderDetail && labOrderDetail.uniqueBookingId != null && labOrderDetail.paymentStatus == "unpaid" && labOrderDetail.orderStatus == "pending"){
+            if(!labOrderDetail){
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
+            if(labOrderDetail.uniqueBookingId != null && labOrderDetail.paymentStatus == "unpaid" && labOrderDetail.orderStatus == "pending"){
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK,messages.paymentInitiated );
             }
-            if(labOrderDetail && labOrderDetail.paymentStatus == "paid" && labOrderDetail.orderStatus == "confirmed"){
+            // already paid (confirmed, Payment Completed, ...) - e.g. a repeated click on a free booking
+            if(labOrderDetail.paymentStatus == "paid"){
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK,messages.orderProcessAlready);
             }
-            if(labOrderDetail && labOrderDetail.uniqueBookingId == null){
+            if(labOrderDetail.uniqueBookingId == null){
+                const uniqueBookingId = await LabTestService.generateUniqueBookingId();
                 if(totalPrice == 0){ //Means Free
                     const updateData = {
                         "totalPrice": totalPrice,
@@ -414,7 +426,8 @@ class labTestController {
                   if(totalPrice > 0){
                      const updateData = {
                         "totalPrice": totalPrice,
-                        "uniqueBookingId" : uniqueBookingId,
+                        // keep the Request ID the patient already has
+                        "uniqueBookingId" : labOrderDetail.uniqueBookingId,
                         "isPaid": false,
                         "orderStatus": "pending",
                         "paymentStatus": "unpaid"
@@ -432,6 +445,8 @@ class labTestController {
                     }
                   }
             }
+            // no branch matched (e.g. free order with a payment already in progress) - never leave the request hanging
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.orderProcessAlready);
         } catch (error) {
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
@@ -441,18 +456,22 @@ class labTestController {
         try {
             const { totalPrice, cartId, orderId } = req.body;
             const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
-            const uniqueBookingId = Math.floor(10000 + Math.random() * 90000);
             const labOrderDetail = await LabOrder.findOne({ 
                 where: { id: orderId },
                 attributes: ['uniqueBookingId', 'paymentStatus', 'orderStatus'],
             });
-            if(labOrderDetail && labOrderDetail.uniqueBookingId != null && labOrderDetail.paymentStatus == "unpaid" && labOrderDetail.orderStatus == "pending"){
+            if(!labOrderDetail){
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
+            if(labOrderDetail.uniqueBookingId != null && labOrderDetail.paymentStatus == "unpaid" && labOrderDetail.orderStatus == "pending"){
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK,messages.paymentInitiated );
             }
-            if(labOrderDetail && labOrderDetail.paymentStatus == "paid" && labOrderDetail.orderStatus == "confirmed"){
+            // already paid (confirmed, Payment Completed, ...) - e.g. a repeated tap on a free booking
+            if(labOrderDetail.paymentStatus == "paid"){
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK,messages.orderProcessAlready);
             }
-            if(labOrderDetail && labOrderDetail.uniqueBookingId == null){
+            if(labOrderDetail.uniqueBookingId == null){
+                const uniqueBookingId = await LabTestService.generateUniqueBookingId();
                 if(totalPrice == 0){ //Means Free
                     const updateData = {
                         "totalPrice": totalPrice,
@@ -488,6 +507,8 @@ class labTestController {
                     }
                 }
             }
+            // no branch matched (e.g. payment already initiated) - never leave the request hanging
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.orderProcessAlready);
         } catch (error) {
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
@@ -733,7 +754,22 @@ class labTestController {
     static async labReschedule(req, res){
         const { orderId, bookingDate, bookingTime } = req.body;
         try {
-            const updateData = {               
+            // care navigator only (patients reschedule through PUT /order/reschedule), and only
+            // for orders of patients in the care navigator's companies
+            if (req.user.role !== 'careNavigator') {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, 'Only a care navigator can reschedule an approved lab test');
+            }
+            if (!orderId || !bookingDate || !bookingTime) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'orderId, bookingDate and bookingTime are required');
+            }
+            const access = await LabTestService.getCareNavigatorOrderAccess(req.user.id, orderId);
+            if (access === 'not_found') {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
+            if (access === 'forbidden') {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, 'This lab order is not assigned to you');
+            }
+            const updateData = {
                 "bookingDate": bookingDate,
                 "bookingTime": bookingTime,
                 "orderStatus": "Reschedule",

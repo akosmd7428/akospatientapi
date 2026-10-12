@@ -16,6 +16,7 @@ const Patient = require('../models/patientModel');
 const NotificationService = require('./notificationService');
 const { sendSms } = require('./smsService');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
+const EmailTemplates = require('../helpers/emailTemplates');
 const LabTestBookingAddress = require('../models/labTestBookingAddress');
 const CareNavigator = require('../models/careNavigatorModel');
 
@@ -1123,8 +1124,51 @@ ORDER BY
             return { status: 400, message: 'Please select a valid time slot' };
         }
 
+        const previousSlot = { date: order.bookingDate, time: order.bookingTime };
         await order.update({ bookingDate, bookingTime, rescheduledBy: patientId });
+        // not awaited: emails must not hold up the reschedule response
+        this.notifyReschedule(order, previousSlot)
+            .catch((err) => console.error('Reschedule notification failed:', err));
         return { status: 200, message: 'Lab test rescheduled successfully', order: { id: order.id, bookingDate, bookingTime } };
+    }
+
+    // patient rescheduled: email the request to the care navigators and an acknowledgement to the patient
+    static async notifyReschedule(order, previousSlot) {
+        const patient = await Patient.findOne({ where: { id: order.patientId } });
+        if (!patient) return;
+        const emailData = await this.getHealthCheckupEmailData(order, patient);
+        const details = {
+            customerName: emailData.name,
+            corporateName: emailData.corporateName,
+            currentDate: previousSlot.date,
+            currentTime: previousSlot.time,
+            location: emailData.location,
+            preferredDate: order.bookingDate,
+            preferredTime: order.bookingTime,
+            requestId: emailData.requestId,
+        };
+
+        if (patient.email) {
+            const { subject, html } = EmailTemplates.healthCheckupRescheduleAcknowledgement(details);
+            await emailHelperSMTP(patient.id, patient.email, subject, html);
+        }
+
+        const careNavigators = await this.getCareNavigatorsForPatient(patient);
+        for (const row of careNavigators) {
+            // one failure must not stop the remaining care navigators from being notified
+            try {
+                const { subject, html } = EmailTemplates.healthCheckupRescheduleRequest({ ...details, careNavigatorName: row.name });
+                if (row.email) await emailHelperSMTP(row.id, row.email, subject, html);
+                await NotificationService.createNotification({
+                    "title": "Health Check-up Rescheduling Request",
+                    "description": `${emailData.name} rescheduled booking ${emailData.requestId} from ${previousSlot.date} at ${previousSlot.time} to ${order.bookingDate} at ${order.bookingTime}.`,
+                    "referenceId": row.id,
+                    "role": "careNavigator"
+                });
+            } catch (err) {
+                console.error(`Care navigator ${row.id} reschedule notification failed:`, err);
+            }
+        }
     }
 
     // sub-city carts have no lab: price each item from connectedLabs by referenceId + type + mode,
@@ -1609,6 +1653,17 @@ ORDER BY
         return prescription;
     }
 
+    // Request ID shown to patients and care navigators: random 8 digits, checked against existing
+    // orders (including IDs migrated from the old system) so two bookings never share one
+    static async generateUniqueBookingId() {
+        for (let attempt = 0; attempt < 10; attempt++) {
+            const candidate = String(Math.floor(10000000 + Math.random() * 90000000));
+            const taken = await LabOrder.count({ where: { uniqueBookingId: candidate } });
+            if (!taken) return candidate;
+        }
+        throw new Error('Could not generate a unique booking id');
+    }
+
     static async createLabOrder(data) {
         const { orderDetails, ...orderData } = data;
         const transaction = await sequelizeDB1.transaction();
@@ -1884,7 +1939,8 @@ WHERE
         return orders;
     }
 
-    static async updateLabOrder(orderId, updateData, response) {
+    // options.cancelledBy: who cancelled (shown in the care navigator cancellation email)
+    static async updateLabOrder(orderId, updateData, response, options = {}) {
 
          const orderDetailPrev = await LabOrder.findOne({
             where: { id: orderId }
@@ -1898,6 +1954,8 @@ WHERE
             where: { id: orderId }
         });
         const patient = await Patient.findOne({ where: { id: orderDetail.patientId } });
+        // Request ID shown in every booking email
+        const requestId = orderDetail.uniqueBookingId || orderDetail.id;
         // get company id of the patient    
 
         // check care plan
@@ -1970,95 +2028,123 @@ WHERE
         }
 
        // const careNavigator = CareNavigator
-        if(status == "confirmed"){ // Send Notifications
-            const patientName = patient.first_name +' '+patient.last_name;
-            await emailHelperSMTP(orderDetail.patientId, patient.email, 'Lab Booking Confirmed', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking has been successfully confirmed.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+        if(status == "confirmed" || status == "Payment Completed"){ // Send Notifications
+            // Payment Completed = request placed, awaiting lab confirmation; confirmed = slot confirmed
+            const isConfirmed = status == "confirmed";
+            const emailData = await this.getHealthCheckupEmailData(orderDetail, patient);
+            const template = isConfirmed ? EmailTemplates.healthCheckupConfirmed : EmailTemplates.healthCheckupRequestReceived;
+            // not awaited: a slow SMTP server must not hold up the booking API response
+            emailHelperSMTP(orderDetail.patientId, patient.email, ...Object.values(template(emailData)))
+                .catch((err) => console.error('Health check-up email failed:', err));
             // Create SMS messages with dynamic content
             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been successfully confirmed. Team AkosMD`;
 
             // await sendSms(patient.phone, patientSMSMsg, "1007143436825772656");
             //Trigger Notification
             const patientNotifyData = {
-                "title" : "Lab Booking Confirmed",
-                "description": `We are pleased to inform you that your lab test booking has been successfully confirmed.`,
+                "title" : isConfirmed ? "Lab Booking Confirmed" : "Health Check-up Request Received",
+                "description": isConfirmed
+                    ? `Your Health Check-up appointment (Booking ID ${emailData.requestId}) is confirmed for ${emailData.date} at ${emailData.time}.`
+                    : `We have received your Health Check-up request (Request ID ${emailData.requestId}). We will notify you once it is confirmed.`,
                 "referenceId": orderDetail.patientId,
                 "role" : "patient"
             }
-            NotificationService.createNotification(patientNotifyData);
-            this.sentCareNavigatorNotification(orderDetail.patientId,status);
-            
+            Promise.resolve(NotificationService.createNotification(patientNotifyData))
+                .catch((err) => console.error('Patient notification failed:', err));
+            this.notifyCareNavigators(patient, emailData, isConfirmed ? 'confirmed' : 'review')
+                .catch((err) => console.error('Care navigator notification failed:', err));
+
         }
         if(status == "cancelled"){ // Send Notifications
-            const patientName = patient.first_name +' '+patient.last_name;
-            await emailHelperSMTP(orderDetail.patientId, patient.email, 'Lab Booking Cancelled', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking has been cancelled.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            const emailData = await this.getHealthCheckupEmailData(orderDetail, patient);
+            // not awaited: a slow SMTP server must not hold up the cancel API response
+            emailHelperSMTP(orderDetail.patientId, patient.email, ...Object.values(EmailTemplates.healthCheckupCancelled(emailData)))
+                .catch((err) => console.error('Health check-up cancelled email failed:', err));
             // Create SMS messages with dynamic content
             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been cancelled. Team AkosMD`;
 
             // await sendSms(patient.phone, patientSMSMsg, "1007143436825772656");
             //Trigger Notification
             const patientNotifyData = {
-                "title" : "Lab Booking Cancelled",
-                "description": `We are pleased to inform you that your lab test booking has been cancelled.`,
+                "title" : "Health Check-up Cancelled",
+                "description": `Your health check-up appointment (Booking ID ${requestId}) on ${orderDetail.bookingDate} at ${orderDetail.bookingTime} has been cancelled.`,
                 "referenceId": orderDetail.patientId,
                 "role" : "patient"
             }
-            NotificationService.createNotification(patientNotifyData);
-            this.sentCareNavigatorNotification(orderDetail.patientId,status);
+            Promise.resolve(NotificationService.createNotification(patientNotifyData))
+                .catch((err) => console.error('Patient notification failed:', err));
+            this.notifyCareNavigators(patient, emailData, 'cancelled', { cancelledBy: options.cancelledBy })
+                .catch((err) => console.error('Care navigator notification failed:', err));
         }
         if(status == "Completed"){ // Send Notifications
-            const patientName = patient.first_name +' '+patient.last_name;
-            await emailHelperSMTP(orderDetail.patientId, patient.email, 'Lab Booking Completed', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking has been Completed.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            const emailData = await this.getHealthCheckupEmailData(orderDetail, patient);
+            // not awaited: a slow SMTP server must not hold up the API response
+            emailHelperSMTP(orderDetail.patientId, patient.email, ...Object.values(EmailTemplates.healthCheckupCompleted(emailData)))
+                .catch((err) => console.error('Health check-up completed email failed:', err));
             // Create SMS messages with dynamic content
             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been Completed. Team AkosMD`;
 
             // await sendSms(patient.phone, patientSMSMsg, "1007143436825772656");
             //Trigger Notification
             const patientNotifyData = {
-                "title" : "Lab Booking Completed",
-                "description": `We are pleased to inform you that your lab test booking has been Completed.`,
+                "title" : "Health Check-up Completed",
+                "description": `Your health check-up (Booking ID ${requestId}) has been completed. We will notify you when your report is available.`,
                 "referenceId": orderDetail.patientId,
                 "role" : "patient"
             }
-            NotificationService.createNotification(patientNotifyData);
-            this.sentCareNavigatorNotification(orderDetail.patientId,status);
+            Promise.resolve(NotificationService.createNotification(patientNotifyData))
+                .catch((err) => console.error('Patient notification failed:', err));
+            this.notifyCareNavigators(patient, emailData, 'completed')
+                .catch((err) => console.error('Care navigator notification failed:', err));
         }
         if(status == "Report Generated"){ // Send Notifications
-            const patientName = patient.first_name +' '+patient.last_name;
-            await emailHelperSMTP(orderDetail.patientId, patient.email, 'Lab Booking Report Generated', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking Report has been Generated.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            const emailData = await this.getHealthCheckupEmailData(orderDetail, patient);
+            // report is one file per order (uploaded separately); its file name serves as the Report ID
+            const reportUrl = orderDetail.labReportURL;
+            const reportId = reportUrl ? decodeURIComponent(String(reportUrl).split('?')[0].split('/').pop()) : undefined;
+            const portalStatus = reportUrl ? 'Available' : 'Pending';
+            // not awaited: a slow SMTP server must not hold up the API response
+            emailHelperSMTP(orderDetail.patientId, patient.email, ...Object.values(EmailTemplates.healthCheckupReportReady(emailData)))
+                .catch((err) => console.error('Health check-up report email failed:', err));
             // Create SMS messages with dynamic content
             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking Report has been Generated.. Team AkosMD`;
 
             // await sendSms(patient.phone, patientSMSMsg, "1007143436825772656");
             //Trigger Notification
             const patientNotifyData = {
-                "title" : "Lab Booking Completed",
-                "description": `We are pleased to inform you that your lab test booking Report has been Generated.`,
+                "title" : "Health Check-up Report Ready",
+                "description": `Your health check-up report (Booking ID ${requestId}) is ready. View it in the portal.`,
                 "referenceId": orderDetail.patientId,
                 "role" : "patient"
             }
-            NotificationService.createNotification(patientNotifyData);
-            this.sentCareNavigatorNotification(orderDetail.patientId,status);
+            Promise.resolve(NotificationService.createNotification(patientNotifyData))
+                .catch((err) => console.error('Patient notification failed:', err));
+            this.notifyCareNavigators(patient, emailData, 'reportGenerated', { reportId, portalStatus })
+                .catch((err) => console.error('Care navigator notification failed:', err));
         }
           if(status == "Reschedule"){ // Send Notifications
-            const patientName = patient.first_name +' '+patient.last_name;
-            await emailHelperSMTP(orderDetail.patientId, patient.email, 'Lab Booking Report Generated', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking Report has been rescheduled from date ${orderDetailPrev.bookingDate} and time ${orderDetailPrev.bookingTime} to ${orderDetail.bookingDate} and time ${orderDetail.bookingTime} .<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            const emailData = await this.getHealthCheckupEmailData(orderDetail, patient);
+            // not awaited: a slow SMTP server must not hold up the reschedule API response
+            emailHelperSMTP(orderDetail.patientId, patient.email, ...Object.values(EmailTemplates.healthCheckupRescheduled({
+                ...emailData,
+                previousDate: orderDetailPrev.bookingDate,
+                previousTime: orderDetailPrev.bookingTime,
+            }))).catch((err) => console.error('Health check-up rescheduled email failed:', err));
             // Create SMS messages with dynamic content
             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking Report has been Generated.. Team AkosMD`;
 
             // await sendSms(patient.phone, patientSMSMsg, "1007143436825772656");
             //Trigger Notification
             const patientNotifyData = {
-                "title" : "Lab Booking Completed",
-                "description": `We are pleased to inform you that your lab test booking has been Rescheduled from date ${orderDetailPrev.bookingDate} and time ${orderDetailPrev.bookingTime} to ${orderDetail.bookingDate} and time ${orderDetail.bookingTime}.`,
+                "title" : "Health Check-up Rescheduled",
+                "description": `Your health check-up appointment (Booking ID ${requestId}) has been rescheduled from ${orderDetailPrev.bookingDate} at ${orderDetailPrev.bookingTime} to ${orderDetail.bookingDate} at ${orderDetail.bookingTime}.`,
                 "referenceId": orderDetail.patientId,
                 "role" : "patient"
             }
-            const fDate = orderDetailPrev.bookingTime;
-            const fTime = orderDetailPrev.bookingTime;
-            const tDate = orderDetail.bookingTime;
-            const tTime = orderDetail.bookingTime;
-            NotificationService.createNotification(patientNotifyData);
-            this.sentCareNavigatorNotification(orderDetail.patientId,status,fDate,fTime,tDate,tTime);
+            Promise.resolve(NotificationService.createNotification(patientNotifyData))
+                .catch((err) => console.error('Patient notification failed:', err));
+            this.notifyCareNavigators(patient, emailData, 'rescheduled', { previousDate: orderDetailPrev.bookingDate, previousTime: orderDetailPrev.bookingTime })
+                .catch((err) => console.error('Care navigator notification failed:', err));
         }
         return result;
     }
@@ -3177,7 +3263,7 @@ WHERE
         const patient = await Patient.findOne({ where: { id: orderDetail.patient_id } });
         if(status == "confirmed"){ // Send Notifications
             const patientName = patient.first_name +' '+patient.last_name;
-            await emailHelperSMTP(orderDetail.patient_id, patient.email, 'Lab Booking Confirmed', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking has been successfully confirmed.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            await emailHelperSMTP(orderDetail.patient_id, patient.email, ...Object.values(EmailTemplates.bookingStatusPatient({ name: patientName, status: 'confirmed' })));      
             // Create SMS messages with dynamic content
             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been successfully confirmed. Team AkosMD`;
 
@@ -3193,7 +3279,7 @@ WHERE
         }
         if(status == "Cancelled"){  // Send Notifications failed  cancelled
             const patientName = patient.first_name +' '+patient.last_name;
-            await emailHelperSMTP(orderDetail.patient_id, patient.email, 'Call Booking Cancelled', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your call booking has been cancelled.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            await emailHelperSMTP(orderDetail.patient_id, patient.email, ...Object.values(EmailTemplates.bookingStatusPatient({ name: patientName, status: 'cancelled', bookingType: 'Call' })));      
             // Create SMS messages with dynamic content
             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been cancelled. Team AkosMD`;
 
@@ -3209,7 +3295,7 @@ WHERE
         }
         if(status == "Completed"){ // Send Notifications
             const patientName = patient.first_name +' '+patient.last_name;
-            await emailHelperSMTP(orderDetail.patient_id, patient.email, 'Call Booking Completed', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking has been Completed.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            await emailHelperSMTP(orderDetail.patient_id, patient.email, ...Object.values(EmailTemplates.bookingStatusPatient({ name: patientName, status: 'completed', bookingType: 'Call' })));      
             // Create SMS messages with dynamic content
             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been Completed. Team AkosMD`;
 
@@ -3225,7 +3311,7 @@ WHERE
         }
         if(status == "Report Generated"){ // Send Notifications
             const patientName = patient.first_name +' '+patient.last_name;
-            await emailHelperSMTP(orderDetail.patient_id, patient.email, 'Call Booking Report Generated', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your call booking Report has been Generated.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            await emailHelperSMTP(orderDetail.patient_id, patient.email, ...Object.values(EmailTemplates.bookingStatusPatient({ name: patientName, status: 'reportGenerated', bookingType: 'Call' })));      
             // Create SMS messages with dynamic content
             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking Report has been Generated.. Team AkosMD`;
 
@@ -3430,6 +3516,143 @@ WHERE
         return [...labs.values()].filter(lab => lab.packages.length === totalPackages && lab.branches.length > 0);
     }
 
+    // values for the health check-up request received / confirmed emails
+    static async getHealthCheckupEmailData(order, patient){
+        const [company, labRows] = await Promise.all([
+            this.getPatientCompanyDetails(patient.id).catch(() => null),
+            sequelizeDB1.query(`
+                SELECT l.labName, lb.branchName, lb.branchAddress
+                FROM labOrders lo
+                LEFT JOIN labs l ON l.id = lo.labId
+                LEFT JOIN labBranches lb ON lb.id = lo.labBranchId
+                WHERE lo.id = :orderId
+                LIMIT 1;`, {
+                replacements: { orderId: order.id },
+                type: QueryTypes.SELECT
+            }).catch(() => [])
+        ]);
+        const lab = labRows[0] || {};
+
+        // lab branch visit -> "Lab - Branch, address"; home collection -> booking address
+        const labLabel = [lab.labName || order.labType, lab.branchName].filter(Boolean).join(' - ');
+        const location = lab.branchAddress
+            ? `${labLabel}, ${lab.branchAddress}`
+            : [labLabel, order.bookingAddress || order.labCityName].filter(Boolean).join(', ');
+
+        return {
+            name: `${patient.first_name || ''} ${patient.last_name || ''}`.trim(),
+            corporateName: company?.company_name,
+            date: order.bookingDate,
+            time: order.bookingTime,
+            location,
+            requestId: order.uniqueBookingId || order.id,
+        };
+    }
+
+    // care navigators assigned to the patient's company - matched on companyId OR employer_id,
+    // the same way the care navigator portal lists the patient's lab orders
+    static async getCareNavigatorsForPatient(patient){
+        const companyIds = [patient.companyId, patient.employer_id]
+            .filter((id) => Number(id) > 0)
+            .map(String);
+        if (!companyIds.length) {
+            console.warn(`No company on patient ${patient.id}; no care navigator to notify`);
+            return [];
+        }
+        const careNavigators = await sequelizeDB1.query(`
+            SELECT id, name, email FROM carenavigator
+            WHERE (${companyIds.map((_, i) => `FIND_IN_SET(:c${i}, REPLACE(companyId, ' ', '')) > 0`).join(' OR ')})`, {
+            replacements: Object.fromEntries(companyIds.map((id, i) => [`c${i}`, id])),
+            type: QueryTypes.SELECT
+        });
+        if (!careNavigators.length) {
+            console.warn(`No care navigator assigned to company ${companyIds.join('/')} (patient ${patient.id})`);
+        }
+        return careNavigators;
+    }
+
+    // 'allowed' when the order's patient belongs to one of the care navigator's companies,
+    // otherwise 'forbidden'; 'not_found' when the order or its patient does not exist
+    static async getCareNavigatorOrderAccess(careNavigatorId, orderId){
+        const order = await LabOrder.findOne({ where: { id: orderId, isDeleted: false }, attributes: ['id', 'patientId'] });
+        if (!order) return 'not_found';
+        const patient = await Patient.findOne({ where: { id: order.patientId } });
+        if (!patient) return 'not_found';
+        const careNavigators = await this.getCareNavigatorsForPatient(patient);
+        return careNavigators.some((row) => Number(row.id) === Number(careNavigatorId)) ? 'allowed' : 'forbidden';
+    }
+
+    // email + in-app notification to the patient's care navigators about a health check-up.
+    // kind: 'review' (new request), 'confirmed' (approved), 'rescheduled' (approved booking moved;
+    // extra.previousDate/previousTime = slot before the move), 'cancelled' (extra.cancelledBy), 'completed'
+    // or 'reportGenerated' (extra.reportId, extra.portalStatus)
+    static async notifyCareNavigators(patient, emailData, kind, extra = {}){
+        const { name, requestId, date, time } = emailData;
+        const { previousDate, previousTime, cancelledBy, reportId, portalStatus } = extra;
+        const byKind = {
+            review: {
+                template: EmailTemplates.healthCheckupReviewCareNavigator,
+                title: "Health Check-up Request Needs Review",
+                description: `${name}'s health check-up request (Request ID ${requestId}) needs review. Please check availability and update the status.`
+            },
+            confirmed: {
+                template: EmailTemplates.healthCheckupConfirmedCareNavigator,
+                title: "Health Check-up Booking Confirmed",
+                description: `${name}'s health check-up booking (Booking ID ${requestId}) is confirmed for ${date} at ${time}.`
+            },
+            rescheduled: {
+                template: EmailTemplates.healthCheckupRescheduledCareNavigator,
+                title: "Health Check-up Appointment Rescheduled",
+                description: `${name}'s health check-up (Booking ID ${requestId}) has been rescheduled from ${previousDate} at ${previousTime} to ${date} at ${time}.`
+            },
+            cancelled: {
+                template: EmailTemplates.healthCheckupCancelledCareNavigator,
+                title: "Health Check-up Booking Cancelled",
+                description: `${name}'s health check-up booking (Booking ID ${requestId}) on ${date} at ${time} has been cancelled${cancelledBy ? ` by ${cancelledBy}` : ''}.`
+            },
+            completed: {
+                template: EmailTemplates.healthCheckupCompletedCareNavigator,
+                title: "Health Check-up Marked Completed",
+                description: `${name}'s health check-up (Booking ID ${requestId}) has been marked as completed. Track the report if one is expected.`
+            },
+            reportGenerated: {
+                template: EmailTemplates.healthCheckupReportGeneratedCareNavigator,
+                title: "Health Check-up Report Generated",
+                description: `${name}'s health check-up report (Booking ID ${requestId}) has been generated. Portal status: ${portalStatus}.`
+            }
+        };
+        const { template, title, description } = byKind[kind];
+        const careNavigators = await this.getCareNavigatorsForPatient(patient);
+        for (const row of careNavigators) {
+            const { subject, html } = template({
+                careNavigatorName: row.name,
+                customerName: name,
+                corporateName: emailData.corporateName,
+                date,
+                time,
+                location: emailData.location,
+                requestId,
+                previousDate,
+                previousTime,
+                cancelledBy,
+                reportId,
+                portalStatus,
+            });
+            // one failure must not stop the remaining care navigators from being notified
+            try {
+                if (row.email) await emailHelperSMTP(row.id, row.email, subject, html);
+                await NotificationService.createNotification({
+                    "title": title,
+                    "description": description,
+                    "referenceId": row.id,
+                    "role": "careNavigator"
+                });
+            } catch (err) {
+                console.error(`Care navigator ${row.id} health check-up notification failed:`, err);
+            }
+        }
+    }
+
     // city and sub city the patient chose for the order
     static async getOrderLocation(orderId){
         const query = `
@@ -3561,26 +3784,17 @@ WHERE
             
     }
     // send notification by carenavigator
-    static async sentCareNavigatorNotification(patientId,status,fDate,fTime,tDate,tTime){
+    static async sentCareNavigatorNotification(patientId,status,fDate,fTime,tDate,tTime,requestId){
 
                 const patient = await Patient.findOne({ where: { id:patientId } });
-                 // get company id of the patient
-                const patient_company_id = patient.companyId;
-                const query_care_navigator = `SELECT * FROM akosmd_live.carenavigator WHERE FIND_IN_SET(:patient_company_id, companyId) > 0`;
-                    const results_care = await sequelizeDB1.query(query_care_navigator, {
-                        replacements: { patient_company_id },
-                        type: QueryTypes.SELECT
-                    });
+                const results_care = await this.getCareNavigatorsForPatient(patient);
 
                       if(status == "confirmed"){ // Send Notifications
                         for (const row of results_care) {
                             const patientName = patient.first_name + ' ' + patient.last_name;
                             await emailHelperSMTP(
                                 row.id, 
-                                row.email, 
-                                'Lab Booking Confirmed', 
-                                `<p>Hi ${row.name}, <br/><br/>We are pleased to inform you that ${patientName}'s lab test booking has been successfully confirmed.<br/><br/>Thank you!<br/>Team AkosMD</p>`
-                            ); 
+                                row.email, ...Object.values(EmailTemplates.bookingStatusCareNavigator({ careNavigatorName: row.name, patientName, status: 'confirmed', requestId }))); 
                             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been successfully confirmed. Team AkosMD`;
                             // await sendSms(patient.phone, patientSMSMsg, "1007143436825772656");
                             const patientNotifyData = {
@@ -3596,8 +3810,7 @@ WHERE
                         for (const row of results_care) {
                             const patientName = patient.first_name +' '+patient.last_name;
                             await emailHelperSMTP(  row.id, 
-                                    row.email, 
-                                    'Lab Booking Cancelled', `<p>Hi ${row.name}, <br/></br>We are pleased to inform you that ${patientName}'s lab test booking has been cancelled.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+                                    row.email, ...Object.values(EmailTemplates.bookingStatusCareNavigator({ careNavigatorName: row.name, patientName, status: 'cancelled', requestId })));      
                             // Create SMS messages with dynamic content
                             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been cancelled. Team AkosMD`;
 
@@ -3617,7 +3830,7 @@ WHERE
                          for (const row of results_care) {
                             const patientName = patient.first_name +' '+patient.last_name;
                             await emailHelperSMTP(row.id, 
-                                    row.email,  'Lab Booking Completed', `<p>Hi ${row.name}'s, <br/></br>We are pleased to inform you that your lab test booking has been Completed.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+                                    row.email, ...Object.values(EmailTemplates.bookingStatusCareNavigator({ careNavigatorName: row.name, patientName, status: 'completed', requestId })));      
                             // Create SMS messages with dynamic content
                             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been Completed. Team AkosMD`;
 
@@ -3637,7 +3850,7 @@ WHERE
                         for (const row of results_care) {
                             const patientName = patient.first_name +' '+patient.last_name;
                             await emailHelperSMTP(row.id, 
-                                    row.email,  'Lab Booking Report Generated', `<p>Hi ${row.name}'s, <br/></br>We are pleased to inform you that your lab test booking Report has been Generated.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+                                    row.email, ...Object.values(EmailTemplates.bookingStatusCareNavigator({ careNavigatorName: row.name, patientName, status: 'reportGenerated', requestId })));      
                             // Create SMS messages with dynamic content
                             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking Report has been Generated.. Team AkosMD`;
 
@@ -3657,7 +3870,7 @@ WHERE
                         for (const row of results_care) {
                             const patientName = patient.first_name +' '+patient.last_name;
                             await emailHelperSMTP(row.id, 
-                                    row.email,  'Lab Booking Report Generated', `<p>Hi ${row.name}'s, <br/></br>We are pleased to inform you that your lab test booking Report has been rescheduled from date ${fDate} and time ${fTime} to ${tDate} and time ${tTime}.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+                                    row.email, ...Object.values(EmailTemplates.bookingStatusCareNavigator({ careNavigatorName: row.name, patientName, status: 'rescheduled', requestId, fromDate: fDate, fromTime: fTime, toDate: tDate, toTime: tTime })));      
                             // Create SMS messages with dynamic content
                             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking Report has been Generated.. Team AkosMD`;
 

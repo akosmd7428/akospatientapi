@@ -6,6 +6,7 @@ const Medicine = require('../models/medicine');
 const { Op } = require('sequelize');
 const Patient = require('../models/patientModel');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
+const EmailTemplates = require('../helpers/emailTemplates');
 const { sendSms } = require('./smsService');
 const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient');
 
@@ -1267,22 +1268,22 @@ class PreEmployeePatientService {
         const Prepatient = await PreEmployeePatient.findOne({ where: { id: id } });
         if(status == "7"){ // Send Notifications
             const patientName = Prepatient.name;
-            await emailHelperSMTP(Prepatient.id, Prepatient.email, 'Lab Booking Confirmed', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking has been successfully confirmed.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            await emailHelperSMTP(Prepatient.id, Prepatient.email, ...Object.values(EmailTemplates.bookingStatusPatient({ name: patientName, status: 'confirmed' })));      
            
         }
         if(status == "4"){ // Send Notifications
             const patientName = Prepatient.name;
-            await emailHelperSMTP(Prepatient.id, patient.email, 'Lab Booking Cancelled', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking has been cancelled.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            await emailHelperSMTP(Prepatient.id, Prepatient.email, ...Object.values(EmailTemplates.bookingStatusPatient({ name: patientName, status: 'cancelled' })));      
           
         }
         if(status == "2"){ // Send Notifications
             const patientName = Prepatient.name;
-            await emailHelperSMTP(Prepatient.id, patient.email, 'Lab Booking Completed', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking has been Completed.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            await emailHelperSMTP(Prepatient.id, Prepatient.email, ...Object.values(EmailTemplates.bookingStatusPatient({ name: patientName, status: 'completed' })));      
           
         }
         if(status == "6"){ // Send Notifications
             const patientName = Prepatient.name;
-            await emailHelperSMTP(Prepatient.id, patient.email, 'Lab Booking Report Generated', `<p>Hi ${patientName}, <br/></br>We are pleased to inform you that your lab test booking Report has been Generated.<br/><br/>Thank you!<br/>Team AkosMD</p>`);      
+            await emailHelperSMTP(Prepatient.id, Prepatient.email, ...Object.values(EmailTemplates.bookingStatusPatient({ name: patientName, status: 'reportGenerated' })));      
            
         }
         return result;

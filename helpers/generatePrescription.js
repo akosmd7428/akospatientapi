@@ -2,6 +2,7 @@ const { generatePdf } = require('./generatePdf'); // Ensure you have this utilit
 const { sendSms } = require('../services/smsService');
 const { emailHelper } = require('../helpers/emailHelper'); // Adjust the path as needed
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP'); // Adjust the path as needed
+const EmailTemplates = require('./emailTemplates');
 const PatientService = require('../services/patientService');
 const { shortenUrl } = require('../services/bitlyService');
 
@@ -253,8 +254,7 @@ const generatePrescription = async (data) => {
         //     const smsMessage = `Hi ${details.patient.name}, Your prescription from AkosMD is available for download here ${shortURL}.`
         //     await sendSms(details.patient.phone, smsMessage);
         // }
-        // await emailHelperSMTP(null, details.patient.email, 'Prescription Received', `<p>Hi ${details.patient.name}, Your prescription from AkosMD is available for download <a href="${pdfLink}">click here</a></p>`);     
-        await emailHelperSMTP(null, details.patient.email, 'Prescription Received', `<p>Hi ${details.patient.name}, <br/></br>Your prescription is now available for download. <a href="${pdfLink}">Click here</a> to access your prescription. If you have any questions or need further assistance, please contact our support team at +91-8595461929.<br/><br/>Thank you!<br/>Team AkosMD</p>`);                
+        // await emailHelperSMTP(null, details.patient.email, ...Object.values(EmailTemplates.prescriptionReady({ name: details.patient.name, link: pdfLink })));                
 
         return true;
     } catch (error) {

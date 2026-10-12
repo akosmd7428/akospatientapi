@@ -9,6 +9,7 @@ const { APPOINTMENT_STATUS, SEND_CONTACT_EMAIL_TO_ADMIN, PRESCRIPTION_LINK_SECRE
 const labTestService = require('../services/labTestService');
 const HelpService = require('../services/helpService');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
+const EmailTemplates = require('../helpers/emailTemplates');
 const AuthService = require('../services/authService');
 const Prescription = require('../models/prescription');
 const PatientFolder = require('../models/patientFoldersModel');
@@ -336,7 +337,13 @@ class CareNavigatorController {
                 updateData.subCityId = subCityId || null;
                 updateData.labBranchId = labBranchId;
             }
-            const result = await labTestService.updateLabOrder(orderId, updateData);
+            // shown as "Cancelled by" in the care navigator cancellation email
+            let cancelledBy;
+            if (status === 'cancelled') {
+                const careNavigator = await HelpService.getCareNavigatorDetailsByEmail(req.user.email).catch(() => null);
+                cancelledBy = careNavigator?.name ? `Care Navigator (${careNavigator.name})` : 'Care Navigator';
+            }
+            const result = await labTestService.updateLabOrder(orderId, updateData, undefined, { cancelledBy });
             if (result[0] === 0) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND,messages.labOrderNotFound );
             }
@@ -423,15 +430,14 @@ class CareNavigatorController {
 
             const careNavigator = await HelpService.getCareNavigatorDetailsByEmail(email);
 
-            const emailContent = `
-            <p>Care Navigator Details:</p>
-            <p><strong>Name:</strong> ${careNavigator.name}</p>
-            <p><strong>Email:</strong> ${careNavigator.email}</p>
-            <p><strong>Mobile:</strong> ${careNavigator.phone}</p>
-            <p><strong>Message:</strong> ${message}</p>
-            `;
+            const { subject, html } = EmailTemplates.adminRequest({
+                subject: 'Care Navigator Help Request',
+                intro: 'A care navigator has submitted a help request:',
+                details: [['Name', careNavigator.name], ['Email', careNavigator.email], ['Mobile', careNavigator.phone]],
+                message,
+            });
 
-            const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'Care Navigator Help Request', emailContent);
+            const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, subject, html);
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, msg);
         } catch (error) {
@@ -517,7 +523,7 @@ class CareNavigatorController {
             const patient = await Patient.findOne({where: { id: patientId} }); 
             console.log(patient,'patient===');
             if(patient){
-                await emailHelperSMTP(null, patient.email, 'Prescription Received', `<p>Hi ${patient.first_name} ${patient.last_name}, <br/></br>Your prescription is now available for download. <a href="${prescriptionURL}">Click here</a> to access your prescription. If you have any questions or need further assistance, please contact our support team at +91-8595461929.<br/><br/>Thank you!<br/>Team AkosMD</p>`); 
+                await emailHelperSMTP(null, patient.email, ...Object.values(EmailTemplates.prescriptionReady({ name: `${patient.first_name} ${patient.last_name}`, link: prescriptionURL }))); 
             }
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.prescriptionUpload); 
         }

@@ -23,7 +23,7 @@ router.delete('/prescription/:prescriptionId', jwtAuth, LabTestController.delete
 router.post('/order',validateDataEncryption(),jwtAuth, LabTestController.createLabOrder);
 router.get('/orders/:orderId', jwtAuth, LabTestController.getLabOrdersByPatient);
 router.put('/order/reschedule',validateDataEncryption(), jwtAuth, LabTestController.rescheduleLabOrder);
-router.put('/order',validateDataEncryption(), LabTestController.updateLabOrder);
+router.put('/order',validateDataEncryption(),jwtAuth, LabTestController.updateLabOrder);
 router.get('/list/:patientId',validateDataEncryption(), jwtAuth, LabTestController.getLabOrders);
 router.delete('/cartRemove/:cartId',validateDataEncryption(), jwtAuth, LabTestController.removeCart);
 router.put('/cart',validateDataEncryption(), jwtAuth, LabTestController.updateLabId);

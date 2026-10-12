@@ -9,6 +9,7 @@ const { APPOINTMENT_STATUS, SEND_CONTACT_EMAIL_TO_ADMIN } = require('../config/s
 const labTestService = require('../services/labTestService');
 const HelpService = require('../services/helpService');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
+const EmailTemplates = require('../helpers/emailTemplates');
 const AuthService = require('../services/authService');
 const Prescription = require('../models/prescription');
 const PatientFolder = require('../models/patientFoldersModel');
@@ -164,13 +165,14 @@ class HrController {
             const { email } = req.query;        
             const preEmployer = await PatientService.getProfileByEmailId(email);
             console.log(preEmployer);
-            const emailContent = `
-            <p>Care Navigator Details:</p>
-            <p><strong>Name:</strong> ${preEmployer.first_name} ${preEmployer.last_name}</p>
-            <p><strong>Email:</strong> ${email}</p>
-            <p><strong>Mobile:</strong> ${preEmployer.phone}</p>
-            <p><strong>Message:</strong> ${message}</p>            `;
-            const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'HRA assesment avail', emailContent);
+            const { subject, html } = EmailTemplates.adminRequest({
+                subject: 'HRA assesment avail',
+                intro: 'HRA assessment reminder for the following employee:',
+                details: [['Name', `${preEmployer.first_name} ${preEmployer.last_name}`], ['Email', email], ['Mobile', preEmployer.phone]],
+                message,
+            });
+
+            const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, subject, html);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, msg);
         } catch (error) {
             console.log(error);
@@ -438,15 +440,14 @@ class HrController {
 
             const careNavigator = await HelpService.getCareNavigatorDetailsByEmail(email);
 
-            const emailContent = `
-            <p>Care Navigator Details:</p>
-            <p><strong>Name:</strong> ${careNavigator.name}</p>
-            <p><strong>Email:</strong> ${careNavigator.email}</p>
-            <p><strong>Mobile:</strong> ${careNavigator.phone}</p>
-            <p><strong>Message:</strong> ${message}</p>
-            `;
+            const { subject, html } = EmailTemplates.adminRequest({
+                subject: 'Care Navigator Help Request',
+                intro: 'A care navigator has submitted a help request:',
+                details: [['Name', careNavigator.name], ['Email', careNavigator.email], ['Mobile', careNavigator.phone]],
+                message,
+            });
 
-            const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'Care Navigator Help Request', emailContent);
+            const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, subject, html);
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, msg);
         } catch (error) {
@@ -532,7 +533,7 @@ class HrController {
             const patient = await Patient.findOne({where: { id: patientId} }); 
             console.log(patient,'patient===');
             if(patient){
-                await emailHelperSMTP(null, patient.email, 'Prescription Received', `<p>Hi ${patient.first_name} ${patient.last_name}, <br/></br>Your prescription is now available for download. <a href="${prescriptionURL}">Click here</a> to access your prescription. If you have any questions or need further assistance, please contact our support team at +91-8595461929.<br/><br/>Thank you!<br/>Team AkosMD</p>`); 
+                await emailHelperSMTP(null, patient.email, ...Object.values(EmailTemplates.prescriptionReady({ name: `${patient.first_name} ${patient.last_name}`, link: prescriptionURL }))); 
             }
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.prescriptionUpload); 
         }
@@ -552,15 +553,14 @@ class HrController {
             console.log(email);
             const hrdetails = await HelpService.getHrDetailsByEmail(email);
 
-            const emailContent = `
-            <p>Care Navigator Details:</p>
-            <p><strong>Name:</strong> ${hrdetails.name}</p>
-            <p><strong>Email:</strong> ${hrdetails.email}</p>
-            <p><strong>Mobile:</strong> ${hrdetails.phone}</p>
-            <p><strong>Message:</strong> ${message}</p>
-            `;
+            const { subject, html } = EmailTemplates.adminRequest({
+                subject: 'HR Help Request',
+                intro: 'An HR user has submitted a help request:',
+                details: [['Name', hrdetails.name], ['Email', hrdetails.email], ['Mobile', hrdetails.phone]],
+                message,
+            });
 
-            const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, 'HR Help Request', emailContent);
+            const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, subject, html);
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, msg);
         } catch (error) {

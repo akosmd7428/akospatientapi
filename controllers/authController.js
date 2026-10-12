@@ -13,6 +13,7 @@ const DoctorService = require('../services/doctorService');
 const crypto = require('crypto');
 const { JWT_SECRET, PATIENT_FRONTEND_URL } = require('../config/secret');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
+const EmailTemplates = require('../helpers/emailTemplates');
 const jwt = require('jsonwebtoken');
 
 // how long a generated sso login code can be used
@@ -408,20 +409,13 @@ class AuthController {
           // Construct verification URL
               const verificationLink = `${PATIENT_FRONTEND_URL}/verify-email?token=${token}`; 
 
-              const emailContent = `
-              <h2>Verify Your Email Address</h2>
-              <p>Hello ${employee_name},</p>
-              <p>Thanks for signing up for <strong>AkosMd</strong>! Please confirm your email address by clicking the button below. This link will expire in <strong>24 hours</strong>.</p>
-    
-              <p><a href="${verificationLink}" class="button">Verify Email</a></p>
-              <p>If you didn’t create an account, you can safely ignore this email.</p>
-              <p></p>
-              <p></p>
-              <p>Thanks & Regards<br/>
-                Akosmd India Team.
-              </p>
-              `;
-              const msg = await emailHelperSMTP(patientDEtails, employee_email, 'Email validation', emailContent);
+              const { subject, html } = EmailTemplates.emailVerification({
+                name: employee_name,
+                corporateName: companyDetails[0].company_name || company_name,
+                link: verificationLink,
+                expiresIn: '24 hours', // matches the token's expiresIn: "1d" above
+              });
+              const msg = await emailHelperSMTP(patientDEtails, employee_email, subject, html);
               return CommonHelper.sendSuccess(res,true, STATUS_CODE.HTTP_200_OK, messages.user_signup_success,{});
             }else{
                return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.user_signup, {  });
