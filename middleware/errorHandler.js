@@ -1,30 +1,29 @@
 // middleware/errorHandler.js
 const LogService = require('../helpers/logErrorHelper');
-const jwt = require('jsonwebtoken');
-const { JWT_SECRET } = require('../config/secret');
+const CommonHelper = require('../helpers/commonHelper');
+const { messages } = require('../config/language');
+const { STATUS_CODE } = require('../config/constant');
+const { verifyLoginToken, getBearerToken } = require('./authorize');
+const { redact } = require('../helpers/redact');
 
 const errorHandler = (err, req, res, next) => {
-  const token = req.headers['authorization']?.replace('Bearer ', '');
-  const userId = req.user ? req.user.id : null; // Assuming you have user info in the request
-  const routeName = req.originalUrl;
-  const functionName = req.headers['host']|| null;
-  const lineNumber = err.stack ? err.stack.split('\n')[1] : 'Unknown'; // Extract the line number from the stack trace
-  const errorMessage = err.message;
-  const additionalData = req.body; // You can log request data if needed
-  const role = req.headers['role'] || null;
+  const decoded = req.user || verifyLoginToken(getBearerToken(req));
+  const userId = decoded ? decoded.id : null;
+  const role = decoded ? decoded.role : null;
+  const routeName = req.path;
+  const functionName = req.headers['host'] || null;
+  const lineNumber = err && err.stack ? err.stack.split('\n')[1] : 'Unknown';
+  const errorMessage = err ? err.message : 'Unknown error';
 
-  if(token){
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        req.user = decoded;
-    } catch (error) {
-        LogService.logError(userId, error.message, routeName, functionName, lineNumber, JSON.stringify(additionalData), role);
-        next();
-    }
+  LogService.logError(userId, errorMessage, routeName, functionName, lineNumber, JSON.stringify(redact(req.body)), role);
+
+  if (res.headersSent) {
+    return next(err);
   }
- 
-  // Log the error
-  LogService.logError(userId, errorMessage, routeName, functionName, lineNumber, JSON.stringify(additionalData), role);
+  // body-parser errors carry a 4xx status, everything else is a server error with no internals in the response
+  const status = err && err.status >= 400 && err.status < 500 ? err.status : STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR;
+  const message = status === STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR ? messages.serverError : 'Invalid request';
+  return CommonHelper.sendError(res, status, message);
 };
 
 module.exports = errorHandler;

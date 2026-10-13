@@ -18,8 +18,8 @@ class VitalMonitoringController {
 
      static async getDeviceMonitoring(req, res) {
         try {
-            const { patient_id } = req.query;
-            //console.log(patient_id);
+            // the logged in patient's readings only, patient_id from the query is ignored
+            const patient_id = req.user.id;
             const monitoryDetails = await VitalMonitoringService.getDeviceMonitoring(patient_id);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { monitoryDetails });
         } catch (error) {
@@ -30,14 +30,26 @@ class VitalMonitoringController {
     static async postVitalMonitoring(req, res) {
         try {
            
-            const { patient_id, deviceDetails} = req.body;
-            
+            const { deviceDetails } = req.body;
+            const patient_id = req.user.id;
+            if (!Array.isArray(deviceDetails)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'deviceDetails is required');
+            }
+
+            // only the reading columns are taken from the client, never id/createdAt/patient
+            const READING_FIELDS = ['param_key_id', 'param_key_name', 'param_value', 'status', 'is_manual'];
             const flattenedFields = deviceDetails.flatMap(device =>
-                device.fields.map(field => ({
-                    ...field,
-                    device_id: device.id,
-                    patient_id: patient_id
-                }))
+                (Array.isArray(device && device.fields) ? device.fields : []).map(field => {
+                    const reading = {};
+                    READING_FIELDS.forEach(key => {
+                        if (field && field[key] !== undefined) reading[key] = field[key];
+                    });
+                    return {
+                        ...reading,
+                        device_id: device.id,
+                        patient_id: patient_id
+                    };
+                })
             );
     
             const monitoryDetails = await VitalMonitoringService.createDeviceMonitoring(flattenedFields,patient_id);
@@ -51,7 +63,8 @@ class VitalMonitoringController {
 
     static async getDetailMonitoring(req, res) {
         try {           
-            const { patient_id, device_id, from_date, to_date} = req.query;
+            const { device_id, from_date, to_date} = req.query;
+            const patient_id = req.user.id;
            
             const monitoringData = await VitalMonitoringService.getVitalMonitoringDetails(patient_id, device_id, from_date, to_date);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { monitoringData });
@@ -61,7 +74,8 @@ class VitalMonitoringController {
     }   
     static async getDetailMonitoring(req, res) {
         try {           
-            const { patient_id, device_id, from_date, to_date} = req.query;           
+            const { device_id, from_date, to_date} = req.query;
+            const patient_id = req.user.id;
             const monitoringData = await VitalMonitoringService.getVitalMonitoringDetails(patient_id, device_id, from_date, to_date);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { monitoringData });
         } catch (error) {
@@ -71,7 +85,8 @@ class VitalMonitoringController {
     // get device comment 
     static async viewDeviceComment(req, res){
         try{
-            const { patient_id, device_id} = req.query;           
+            const { device_id} = req.query;
+            const patient_id = req.user.id;
             const deviceComments = await VitalMonitoringService.getDeviceComment(patient_id, device_id);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { deviceComments });
         }catch(error){
@@ -81,8 +96,9 @@ class VitalMonitoringController {
     // post device comment
     static async postDeviceComment(req, res){
          try{
-            const  post_details = req.body;        
-            //console.log(post_details);
+            const { device_id, comment, created_by, user_type } = req.body;
+            // the comment is always attached to the logged in patient, id/status/patient_id from the client are ignored
+            const post_details = { device_id, comment, created_by, user_type, patient_id: req.user.id };
             const deviceComments = await VitalMonitoringService.postDeviceComment(post_details);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { deviceComments });
         }catch(error){

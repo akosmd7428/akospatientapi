@@ -27,7 +27,7 @@ const emailHelperSMTP = async (userId, to, subject, htmlContent) => {
   const mailOptions = {
     from: SMTP_SENDER_FROM,
     to,
-    subject,
+    subject: String(subject ?? '').replace(/[\r\n]+/g, ' '),
     html: htmlContent,
   };
 

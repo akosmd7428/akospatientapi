@@ -58,7 +58,11 @@ class NotificationService {
     //     return notifications;
     // }
 
+    // role and referenceId must be the authenticated user's, both are required so one user can never list everybody's notifications
     static async getNotifications(role, referenceId, filter) {
+        if (!role || !referenceId) {
+            return { notifications: [], totalCount: 0 };
+        }
         let whereClause = `WHERE 1=1`;
         let unreadWhereClause = `WHERE 1=1`; // For counting unread notifications
     
@@ -118,11 +122,12 @@ class NotificationService {
         return { notifications, totalCount };
     }
 
-    static async removeNotification(notificationId) {
+    static async removeNotification(notificationId, referenceId, role) {
         try {
+            // only the owner can remove a notification
             const notification = await Notifications.update(
                 { isActive: 0 },
-                { where: { id: notificationId } }
+                { where: { id: notificationId, referenceId, role } }
             );
         
             return notification;
@@ -133,6 +138,9 @@ class NotificationService {
 
     static async updateReadNotification(referenceId, role) {
         try {
+            if (!referenceId || !role) {
+                throw new Error('referenceId and role are required');
+            }
             const notification = await Notifications.update(
                 { isRead: 1 },
                 { where: { referenceId, role } }

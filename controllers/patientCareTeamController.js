@@ -9,6 +9,12 @@ class PatientCareTeamController {
             const patientId = req.user.id;
             const doctorIds = req.body.doctorIds;
 
+            // only doctors of the companies the patient is connected to can be added
+            const allowedDoctorIds = await PatientCareTeamService.getAllowedDoctorIds(patientId, doctorIds);
+            if (doctorIds.some(doctorId => !allowedDoctorIds.includes(Number(doctorId)))) {
+                return sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, 'Access denied');
+            }
+
             const data = doctorIds.map(doctorId => ({ patientId, doctorId }));
 
             const result = await PatientCareTeamService.addDoctorsToCareTeam(data, patientId);

@@ -132,7 +132,7 @@ class AppointmentService {
                     (a.date > :localDate) 
                     OR (a.date = :localDate AND a.time >= :localTime)
                 )` : ''}
-                AND p.employer_id IN (${careCompanyIds})
+                AND p.employer_id IN (:careCompanyIds)
         `;              
         switch (filter) {
             case '1': // Last month
@@ -157,11 +157,12 @@ class AppointmentService {
             ORDER BY 
                 a.date DESC
             `;
-    
+
         const replacements = {
             status,
             localDate,
             localTime,
+            careCompanyIds,
         };
     
         if (searchQuery) {
@@ -193,7 +194,7 @@ class AppointmentService {
             WHERE 
                 a.isActive = true 
                 AND a.status = :status
-                 AND p.employer_id IN (${careCompanyIds})
+                 AND p.employer_id IN (:careCompanyIds)
             ORDER BY 
                 a.date DESC
             LIMIT 5;
@@ -201,6 +202,7 @@ class AppointmentService {
         
         const replacements = {
             status,
+            careCompanyIds,
         };
     
         const appointments = await sequelizeDB1.query(query, {

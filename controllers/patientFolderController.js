@@ -6,7 +6,8 @@ const { messages } = require('../config/language');
 class patientFolderController {
     static async getFolders(req, res) {
         try {
-            const { page = 1, search } = req.query;
+            const { search } = req.query;
+            const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
             const patientId = req.user.id;
 
             const folders = await patientFolderService.getFolders(patientId, page, search);

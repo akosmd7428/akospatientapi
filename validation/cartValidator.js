@@ -21,10 +21,10 @@ const addToCartSchema = Joi.object({
         'number.integer': 'Company ID must be an integer.',
         'any.required': 'Company ID is required.'
     }),
-    patientId: Joi.number().integer().required().messages({
+    // accepted for old app versions but ignored, the cart always belongs to the logged-in patient
+    patientId: Joi.number().integer().messages({
         'number.base': 'Patient ID must be a number.',
-        'number.integer': 'Patient ID must be an integer.',
-        'any.required': 'Patient ID is required.'
+        'number.integer': 'Patient ID must be an integer.'
     }),
     labId: Joi.any(),   // Accepts any value
     labType: Joi.any(), // Accepts any value

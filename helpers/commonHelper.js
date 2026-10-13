@@ -1,6 +1,18 @@
 const { encryptData,decryptData } = require('../config/encryption');
 class CommonHelper {
+    // 5xx details (sql errors, stack messages) are logged on the server and never sent to the client
+    static safeErrors(statusCode, errors) {
+        if (statusCode >= 500) {
+            if (errors && (typeof errors !== 'object' || Object.keys(errors).length)) {
+                console.error('Server error:', errors);
+            }
+            return [];
+        }
+        return errors;
+    }
+
     static sendErrorUnencrypt(res, statusCode, message, errors = []) {
+        errors = CommonHelper.safeErrors(statusCode, errors);
         res.status(statusCode).json({
             success: false,
             message,
@@ -35,6 +47,7 @@ class CommonHelper {
              });
      }
      static sendError(res, statusCode, message, errors = []) {
+        errors = CommonHelper.safeErrors(statusCode, errors);
 
         let dataJson = { 
             success: false,
@@ -148,7 +161,6 @@ class CommonHelper {
         }
         const valueBuffer = Buffer.from(value);
         const expectedBuffer = Buffer.from(expected);
-        console.log(valueBuffer);
         if (valueBuffer.length !== expectedBuffer.length) {
             return false;
         }

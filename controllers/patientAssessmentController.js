@@ -11,9 +11,12 @@ const AssessmentResponse = require('../models/assessmentResponse');
 class PatientAssessmentController {
     static async createPatientAssessment(req, res, next) {
         try {
-            const { body } = req;
+            const { id, assessmentId, assessmentQuestionId, assessmentOptionId } = req.body;
+            // only known fields are saved, and always for the logged in patient
+            const data = { assessmentId, assessmentQuestionId, assessmentOptionId, patientId: req.user.id };
+            if (id) data.id = id;
             // Call service method to create patient assessment
-            const patientAssessment = await PatientAssessmentService.createOrUpdatePatientAssessment(body);
+            const patientAssessment = await PatientAssessmentService.createOrUpdatePatientAssessment(data);
             
             return sendSuccess(res, true, STATUS_CODE.HTTP_201_CREATED, messages.assessmentCreated, { patientAssessment });
         } catch (error) {
@@ -23,8 +26,13 @@ class PatientAssessmentController {
 
     static async createPatientAssessments(req, res, next) {
         try {
-            const { body } = req;
-            const { assessmentId, patientId, level, levelName } = req.body;
+            // the answers are always stored for the logged in patient, patientId from the body is ignored
+            const patientId = req.user.id;
+            const body = { ...req.body, patientId };
+            const { assessmentId, level, levelName } = body;
+            if (!Array.isArray(body.responses) || !body.responses.length) {
+                return sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.assessmentCreatingError);
+            }
             let API_URL;
             let finalResponsePercentageMulti;
             let assessmentLevel;
@@ -280,7 +288,13 @@ class PatientAssessmentController {
 
     static async createBehaviouralHealth(req, res, next) {
         try {
-            const { body } = req;
+            if (!Array.isArray(req.body) || !req.body.length) {
+                return sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.assessmentCreatingError);
+            }
+            // only known fields are saved, and always for the logged in patient
+            const body = req.body.map(({ assessmentId, assessmentQuestionId, assessmentOptionId }) => ({
+                assessmentId, assessmentQuestionId, assessmentOptionId, patientId: req.user.id,
+            }));
             // Call service method to create multiple patient assessments
             await PatientAssessmentService.createBehaviouralHealth(body);
             const assessmentResponse = await PatientAssessmentService.calculateSeverity(req.user.id, body);

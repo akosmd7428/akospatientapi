@@ -10,7 +10,7 @@ const EmailTemplates = require('../helpers/emailTemplates');
 class HelpController {
   static async getHelpFaq(req, res, next) {
     try {
-      const searchQuery = req.query.q || '';
+      const searchQuery = typeof req.query.q === 'string' ? req.query.q.slice(0, 100) : '';
       const faqData = await HelpService.getHelpFaq(searchQuery);
 
       return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.faqFetched, { faqData });
@@ -22,9 +22,8 @@ class HelpController {
   static async sendEmail(req, res, next) {
     try {
       const { message } = req.body;
-      const { email } = req.user;
-
-      const patient = await HelpService.getPatientDetailsByEmail(email);
+      // look the patient up by the token id, the email in the token can be shared with dependents
+      const patient = await HelpService.getPatientDetailsById(req.user.id);
 
       const { subject, html } = EmailTemplates.adminRequest({
           subject: 'Patient Help Request',

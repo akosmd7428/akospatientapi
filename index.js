@@ -21,37 +21,43 @@ const careNavigatorRoutes = require('./routes/careNavigatorRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const prescriptionRoutes = require('./routes/prescriptionRoutes');
 const chatRoutes = require('./routes/chatRoutes');
-const CommonHelper = require('./helpers/commonHelper');
-const { messages } = require('./config/language');
-const { STATUS_CODE } = require('./config/constant');
-const Chat = require('./models/chat')
-const ChatService = require('./services/chatService');
-const NotificationService = require('./services/notificationService');
-const DataController = require('./controllers/dataController');
 const errorHandler = require('./middleware/errorHandler');
 const routeLogger = require('./middleware/routeLogger');
 const rateLimit = require('express-rate-limit');
-const AppointmentService = require('./services/appointmentService');
 const hrRoutes = require('./routes/hrRoutes');
 const vitalMonitoringRoutes = require('./routes/vitalMonitoringRoutes');
 const migrationRoutes = require('./routes/migrationRoutes');
 const connectAccessRoutes = require('./routes/connectAccessRoutes');
 const portalModuleRoutes = require('./routes/portalModuleRoutes');
+const initSocket = require('./socket');
 const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const httpServer = http.createServer(app);
 
-app.use(express.json({ limit: '50mb' })); // Increase the limit to 50MB or as needed
+// the api runs behind nginx, trust its X-Forwarded-For so rate limits are per client and not per proxy
+app.set('trust proxy', process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1);
+app.disable('x-powered-by');
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+});
+
+app.use(express.json({ limit: '50mb' })); // base64 uploads go through json bodies
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Use the cors middleware with specific options
+// allowed browser origins, comma separated in CORS_ORIGINS
+const DEFAULT_CORS_ORIGINS = 'https://carenavigator.akosmd.in,https://360.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
 const corsOptions = {
-  // origin: "*",
-  origin: ["https://carenavigator.akosmd.in", "https://360.akosmd.in","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004", "http://localhost:3005"],
+  origin: (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim()).filter(Boolean),
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-  allowedHeaders: ['Content-Type', 'Authorization','role','companyId'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'role', 'companyId', 'x-sync-api-key'],
 };
 
 app.use(cors(corsOptions));
@@ -59,17 +65,36 @@ app.use(cors(corsOptions));
 // Define the rate limiter
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes window
-  max: 1000, // Limit each IP to 100 requests per windowMs
+  max: 1000, // Limit each IP to 1000 requests per windowMs
   message: 'Too many requests from this IP, please try again after 15 minutes',
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
 
+// login, otp and code endpoints are brute force targets, keep them on a much tighter budget
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: 'Too many attempts, please try again after 15 minutes',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Apply to all API routes
 app.use('/api', apiLimiter);
+app.use([
+  '/api/auth/login',
+  '/api/patient/details',
+  '/api/auth/verify-email-token',
+  '/api/auth/sso-client-login',
+  '/api/auth/sso-verify-code',
+  '/api/auth/external-signup',
+  '/api/forgot-password',
+  '/api/connect-access/verify-code',
+  '/api/careNavigator/login',
+  '/api/labs/verify-call-coupon',
+], authLimiter);
 
-// Parse JSON bodies
-app.use(express.json());
 // Apply route logger middleware to log all API route accesses
 app.use(routeLogger);
 
@@ -97,14 +122,19 @@ app.use('/api/migration', migrationRoutes);
 app.use('/api/connect-access', connectAccessRoutes);
 app.use('/api/portal-modules', portalModuleRoutes);
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, err.message);
-});
+// uploaded files, served as downloads so an uploaded html/svg can never run in the api origin
+app.use('/assets', express.static(path.join(__dirname, 'assets'), {
+  dotfiles: 'deny',
+  index: false,
+  setHeaders: (res, filePath) => {
+    if (!/\.(png|jpe?g|gif|webp|pdf)$/i.test(filePath)) {
+      res.setHeader('Content-Disposition', 'attachment');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    }
+  },
+}));
 
-app.use('/assets', express.static(path.join(__dirname, 'assets')));
-
-// Error handling middleware (always at the end)
+// Error handling middleware (always at the end), logs the error and returns a generic response
 app.use(errorHandler);
 
 sequelizeDB1.sync()
@@ -116,341 +146,4 @@ sequelizeDB1.sync()
   })
   .catch(err => console.error('Unable to sync database:', err));
 
-console.log(
-  "-----------------Server.js:- Connecting to Socket Server patient---------------------"
-);
-
-const socket = require("socket.io");
-const io = socket(httpServer);
-
-io.on("connection", (socket) => {
-  socket.on('joinRoom', async ({ senderId, senderType, receiverId, receiverType }, callback) => {
-      const senderRoom = `${senderId}_${senderType}_${receiverId}_${receiverType}`;
-      const receiverRoom = `${receiverId}_${receiverType}_${senderId}_${senderType}`;
-      
-      // Join the rooms
-      socket.join(senderRoom);
-      socket.join(receiverRoom);
-
-      if (callback) {
-          callback({ success: true, senderRoom: senderRoom, receiverRoom: receiverRoom });
-      }
-  });
-  
-  socket.on('sendMessage', async ({ senderId, senderType, receiverId, receiverType, message, messageType }, callback) => {
-    try {
-      await Chat.create({ senderId, senderType, receiverId, receiverType, message, messageType, roomId: `${senderId}_${senderType}_${receiverId}_${receiverType}` });
-      
-      // Create the rooms for both users
-      const senderRoom = `${senderId}_${senderType}_${receiverId}_${receiverType}`;
-      const receiverRoom = `${receiverId}_${receiverType}_${senderId}_${senderType}`;
-
-      socket.join(senderRoom);
-      socket.join(receiverRoom);
-     
-      const senderChatList = await ChatService.getChatList(senderId, senderType);
-      const receiverChatList = await ChatService.getChatList(receiverId, receiverType);
-     
-      io.to(senderRoom).emit('chatList', { senderId, senderType, senderChatList });
-      io.to(receiverRoom).emit('chatList', { receiverId, receiverType, receiverChatList });
-
-      const senderChatHistory = await ChatService.getChatHistory(senderId, senderType, receiverId, receiverType);
-      const receiverChatHistory = await ChatService.getChatHistory(receiverId, receiverType, senderId, senderType);
-      console.log(senderRoom,'senderRoom===');
-      console.log(receiverRoom,'receiverRoom===');
-      // console.log(senderChatHistory,'senderChatHistory===');
-      // console.log(receiverChatHistory,'receiverChatHistory===');
-      io.to(senderRoom).emit('chatHistory', { senderId, senderType, senderChatHistory });
-      io.to(receiverRoom).emit('chatHistory', { receiverId, receiverType, receiverChatHistory });
-
-      if (callback) {
-        callback({ success: true});
-      }
-    } catch (error) {
-      if (callback) {
-        callback({ success: false, error: error.message });
-      }
-    }
-  });
-
-  socket.on('createRoom', async ({ senderId, senderType, receiverId, receiverType }, callback) => {
-    try {
-      await Chat.create({ senderId, senderType, receiverId, receiverType, roomId: `${senderId}_${senderType}_${receiverId}_${receiverType}` });
-      
-      // Create the rooms for both users
-      const senderRoom = `${senderId}_${senderType}_${receiverId}_${receiverType}`;
-      const receiverRoom = `${receiverId}_${receiverType}_${senderId}_${senderType}`;
-
-      socket.join(senderRoom);
-      socket.join(receiverRoom);
-
-      const senderChatList = await ChatService.getChatList(senderId, senderType);
-      const receiverChatList = await ChatService.getChatList(receiverId, receiverType);
-
-      io.to(senderRoom).emit('chatList', { senderId, senderType, senderChatList });
-      io.to(receiverRoom).emit('chatList', { receiverId, receiverType, receiverChatList });
-
-      const senderChatHistory = await ChatService.getChatHistory(senderId, senderType, receiverId, receiverType);
-      const receiverChatHistory = await ChatService.getChatHistory(receiverId, receiverType, senderId, senderType);
-     
-      io.to(senderRoom).emit('chatHistory', { senderId, senderType, senderChatHistory });
-      io.to(receiverRoom).emit('chatHistory', { receiverId, receiverType, receiverChatHistory });
-
-      if (callback) {
-        callback({ success: true});
-      }
-    } catch (error) {
-      if (callback) {
-        callback({ success: false, error: error.message });
-      }
-    }
-  });
-
-  // Event to get chat list
-  socket.on('getChatList', async ({ userId, userType }, callback) => {
-    try {
-      const chatList = await ChatService.getChatList(userId, userType);
-      callback({ success: true, userId, userType, chatList });
-    } catch (error) {
-      callback({ success: false, error: error.message });
-    }
-  });
-
-  // Event to get chat history
-  socket.on('getChatHistory', async ({ senderId, senderType, receiverId, receiverType }, callback) => {
-    try {
-      const chatHistory = await ChatService.getChatHistory(senderId, senderType, receiverId, receiverType);
-      callback({ success: true, senderId, senderType, receiverId, receiverType, chatHistory });
-    } catch (error) {
-      callback({ success: false, error: error.message });
-    }
-  });
-
-
-   // Event to get chat history
-   socket.on('getNotifications', async ({ role, referenceId, filter }, callback) => {
-    try {
-      const notifications = await NotificationService.getNotifications(role, referenceId, filter);
-      callback({ success: true, notifications });
-    } catch (error) {
-      callback({ success: false, error: error.message });
-    }
-  });
-
-  socket.on('fetchPatientCallDetail', async ({ userId }, callback) => {
-    //try {
-      console.log("chatCallBack Start");
-      const callDetails = await ChatService.getCallDetailsForPatient(userId);
-      console.log(callDetails);
-      callback({ success: true, callDetails });
-    //} catch (error) {
-     // console.log("chatCallBack error", error.message);
-     // callback({ success: false, error: error.message });
-   // }
-  });
-
-  socket.on('listen', async ({ userId, userType }, callback) => {
-      try {
-          // Fetch the user's chat list
-          const chatList = await ChatService.getChatList(userId, userType);
-            // Loop through the chat list to create and join rooms
-            chatList.forEach(chat => {
-              if(chat){
-                const senderRoom = `${userId}_${userType}_${chat.chatPartnerId}_${chat.chatPartnerType}`;
-                const receiverRoom = `${chat.chatPartnerId}_${chat.chatPartnerType}_${userId}_${userType}`;
-                
-                // Join the rooms
-                socket.join(senderRoom);
-                socket.join(receiverRoom);
-              }
-            });
-          
-          // await ChatService.updateUserStatus(userId, userType, true);          
-          // Optionally send back the chat list
-          if (callback) {
-              callback({ success: true });
-          }
-      } catch (error) {
-          // Optionally send back an error to the client
-          if (callback) {
-              callback({ success: false, error: error.message });
-          }
-      }
-  });
-
-  socket.on('incomingCallListUpdate', async ({ patientid, docid, groupid, callid }, callback) => {
-    // try {
-      console.log("incomingCallListUpdate socket called============");
-      let waitingList = await DataController.getTalkToDoctorCallList(patientid, callid);
-      let data = {
-        waitingList
-      };
-
-      let fetchDoctorCallData = await AppointmentService.fetchDoctorIds(patientid);
-      const connectDoctorIds = fetchDoctorCallData.connectDoctorIds;
-      const groupIds = fetchDoctorCallData.groupIds;
-
-      await Promise.all(connectDoctorIds.map(async (id, index) => {
-        if(data.waitingList[0] != undefined){
-          data.waitingList[0].group_id = groupIds[index];
-          data.waitingList[0].pcp_doctor_id = id;
-          data.waitingList[0].callHide = 1;
-          // const room = `${id}_${groupIds[index]}`;
-          // io.to(room).emit('removeIncomingCall', data);
-          // console.log(room, 'removeIncomingCall===================');          
-          // io.emit('removeIncomingCall', data);  
-                
-          io.emit('incomingCallListFront', data);        
-        }
-      }));        
-      if (callback) {
-        callback({ success: true});
-      }
-    // } catch (error) {
-    //     // Optionally send back an error to the client
-    //     if (callback) {
-    //         callback({ success: false, error: error.message });
-    //     }
-    // }
-  });
-
-  socket.on('incomingCallTalkToDoctor', async ({ connectDoctorIds, groupIds, patientId, callId }, callback) => {
-      try {
-        console.log("incomingCallTalkToDoctor socket called============");        
-        let waitingList = await DataController.getTalkToDoctorCallList(patientId, callId);
-        let data = {
-          waitingList
-        };
-        
-        await Promise.all(connectDoctorIds.map(async (id, index) => {
-          if(data.waitingList[0] != undefined){
-            // const room = `${id}_${groupIds[index]}`;
-            // socket.join(room);
-            console.log(data,"incomming call");
-            data.waitingList[0].group_id = groupIds[index];
-            data.waitingList[0].pcp_doctor_id = id;
-            data.waitingList[0].callHide = 0;
-            io.emit('incomingCallListFront', data); 
-          }
-        }));  
-        if (callback) {
-          callback({ success: true});
-        }
-      } catch (error) {
-          // Optionally send back an error to the client
-          if (callback) {
-              callback({ success: false, error: error.message });
-          }
-      }
-  });
-
-  socket.on('incomingCallList', async ({ docid, groupId }, callback) => {
-      try {
-      const id = docid;
-      const group_id = [
-        {
-            "id": groupId
-        }
-      ];
-      const waitingList = await DataController.getWaitingUserList(id, group_id);
-      
-        const data = {
-          waitingList
-        }
-        
-        io.emit('incomingCallListFront', data);
-
-        if (callback) {
-          callback({ success: true});
-        }
-      } catch (error) {
-          // Optionally send back an error to the client
-          if (callback) {
-              callback({ success: false, error: error.message });
-          }
-      }
-  });
-
-  socket.on('incomingCall', async ({ docid, groupId }, callback) => {
-    try {
-    const id = docid;
-    const group_id = [
-      {
-          "id": groupId
-      }
-    ];
-    const waitingList = await DataController.getWaitingUserList(id, group_id);
-      const data = {
-        waitingList
-      }
-      if (callback) {
-        callback({ success: true, data});
-      }
-    } catch (error) {
-        // Optionally send back an error to the client
-        if (callback) {
-            callback({ success: false, error: error.message });
-        }
-    }
-  });
-  // update scoket
-  socket.on('acceptedCallByDoctor', async ({ userId }, callback) => {
-    //try {
-      console.log(userId,"updated doctor records  ====== Start");
-      const callDetails = await ChatService.getCallDetailsForPatientAccept(userId);
-     // console.log(callDetails);
-      const data = {
-        callDetails
-      }
-      io.emit('acceptedCallRecordFront', data);
-      callback({ success: true, data });
-
-    //} catch (error) {
-     // console.log("chatCallBack error", error.message);
-     // callback({ success: false, error: error.message });
-   // }
-  });
-
-  // update scoket
-  socket.on('declinefromPatient', async ({ doctorId,patientId,connectDocId }, callback) => {
-    //try {
-      console.log(connectDocId,"decline from patient  ====== Start");
-      const callDetails = await ChatService.updateCallingRoom(doctorId,patientId,connectDocId);
-     // console.log(callDetails);
-      const data = {
-        "doctorId" : doctorId,
-        "patientId" :patientId,
-        "connectDocId" :connectDocId
-      }
-      io.emit('declinefromPatientFront', data);
-      callback({ success: true, data });
-
-    //} catch (error) {
-     // console.log("chatCallBack error", error.message);
-     // callback({ success: false, error: error.message });
-   // }
-  });
-
-  socket.on('declinefromDoctor', async ({ doctorId,patientId,connectDocId }, callback) => {
-    //try {
-      console.log(connectDocId,"declinefrom doctor  ====== Start");
-      const callDetails = await ChatService.updateCallingRoom(doctorId,patientId,connectDocId);
-     // console.log(callDetails);
-     const data = {
-      "doctorId" : doctorId,
-      "patientId" :patientId,
-      "connectDocId" :connectDocId
-    }
-      io.emit('declinefromDoctorFront', data);
-      callback({ success: true, data });
-
-    //} catch (error) {
-     // console.log("chatCallBack error", error.message);
-     // callback({ success: false, error: error.message });
-   // }
-  });
-  
-  socket.on("disconnect", function () {
-    console.log("Socket Disconnected");
-  });
-});
+initSocket(httpServer);

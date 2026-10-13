@@ -3,11 +3,17 @@ const CommonHelper = require('../helpers/commonHelper');
 const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
 const LabOrder = require('../models/labOrder');
+const LabTestPrescription = require('../models/labTestPrescriptions');
+const { ROLES } = require('../middleware/authorize');
 
 class labTestController {
     static async getPackagesAndTests(req, res) {
         try {
             const { companyId, search } = req.query;
+            // only the price list of a company the patient belongs to
+            if (!(await LabTestService.isPatientCompany(req.user.id, companyId))) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, "Invalid company");
+            }
             const result = await LabTestService.getPackagesAndTests(companyId, search);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { result });
         } catch (error) {
@@ -32,10 +38,17 @@ class labTestController {
            // console.log(req.body,"card Item");
             const { type, mode, referenceId, companyId,labId,labType,code} = req.body;
             const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
+            // the cart company decides prices and free packages, it has to be the patient's company
+            if (!(await LabTestService.isPatientCompany(patientId, companyId))) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, "Invalid company");
+            }
 
             const cartItem = await LabTestService.addToCart({ patientId, type, mode, referenceId, companyId, labId, labType, code });
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.itemAddedToCart, { cartItem });
         } catch (error) {
+            if (error.statusCode) {
+                return CommonHelper.sendError(res, error.statusCode, error.message);
+            }
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
@@ -98,6 +111,12 @@ class labTestController {
     static async getTestsAndPackagesByLab(req, res) {
         try {
             const { companyId, search, labId, cartId } = req.body;
+            if (!(await LabTestService.isPatientCompany(req.user.id, companyId))) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, "Invalid company");
+            }
+            if (cartId && !(await LabTestService.getOwnedCart(cartId, req.user.id))) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.cartNotFound);
+            }
 
             const result = await LabTestService.getTestsAndPackagesByLab(companyId, search, labId, cartId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, result);
@@ -122,10 +141,13 @@ class labTestController {
         try {
             const { cartId } = req.params;
 
-            const result = await LabTestService.removeCartItem(cartId);
+            const result = await LabTestService.removeCartItem(cartId, req.user.id);
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.cartItemRemoved, result);
         } catch (error) {
+            if (error.statusCode) {
+                return CommonHelper.sendError(res, error.statusCode, error.message);
+            }
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
@@ -134,7 +156,10 @@ class labTestController {
         try {
             const { cartId } = req.params;
 
-            const result = await LabTestService.removeCart(cartId);
+            const result = await LabTestService.removeCart(cartId, req.user.id);
+            if (!result) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.cartNotFound);
+            }
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.cartItemsRemoved, result);
         } catch (error) {
@@ -144,7 +169,14 @@ class labTestController {
 
     static async getPrescriptionUrl(req, res) {
         try {
-            const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
+            // a patient only sees their own, a care navigator a patient of their companies
+            let patientId = req.user.id;
+            if (req.user.role === ROLES.CARE_NAVIGATOR) {
+                patientId = parseInt(req.params.patientId, 10);
+                if (!patientId || !(await LabTestService.isPatientInCareScope(patientId, req.careCompanyIds))) {
+                    return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, "Access denied");
+                }
+            }
             const prescription = await LabTestService.getPrescriptionUrl(patientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.prescriptionFetched, { prescription });
         } catch (error) {
@@ -155,6 +187,17 @@ class labTestController {
     static async deletePrescription(req, res) {
         try {
             const { prescriptionId } = req.params;
+            const prescriptionRow = await LabTestPrescription.findOne({
+                where: { id: prescriptionId, isActive: true, isDeleted: false },
+                attributes: ['id', 'patientId'],
+            });
+            // patient: own prescription, care navigator: prescription of a patient in their companies
+            const allowed = !!prescriptionRow && (req.user.role === ROLES.CARE_NAVIGATOR
+                ? await LabTestService.isPatientInCareScope(prescriptionRow.patientId, req.careCompanyIds)
+                : Number(prescriptionRow.patientId) === Number(req.user.id));
+            if (!allowed) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "Prescription not found");
+            }
             await LabTestService.deletePrescription(prescriptionId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.prescriptionDeleted);
         } catch (error) {
@@ -164,9 +207,14 @@ class labTestController {
 
     static async createLabOrder(req, res) {
         try {
-            const labOrder = await LabTestService.createLabOrder({ ...req.body, patientId: req.user.id }); // always the logged-in user, never a patientId sent by the app
+            // always the logged-in user; only whitelisted fields, items checked against the cart and the price list
+            const orderData = await LabTestService.prepareLabOrder(req.body, req.user.id);
+            const labOrder = await LabTestService.createLabOrder(orderData);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.orderCreated, { labOrder });
         } catch (error) {
+            if (error.statusCode) {
+                return CommonHelper.sendError(res, error.statusCode, error.message);
+            }
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
@@ -174,6 +222,11 @@ class labTestController {
     static async getLabOrdersByPatient(req, res) {
         try {
             const { orderId } = req.params;
+            // only the logged-in patient's own order
+            const order = await LabOrder.findOne({ where: { id: orderId, patientId: req.user.id, isDeleted: false }, attributes: ['id'] });
+            if (!order) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
             const labOrders = await LabTestService.getLabOrdersByPatientId(orderId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.ordersFetched, { labOrders });
         } catch (error) {
@@ -193,8 +246,8 @@ class labTestController {
             if (!order) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
             }
+            // totalPrice is accepted but ignored, the amount is worked out on the server at payment time
             const updateData = {
-                "totalPrice": totalPrice,
                 "bookingDate": bookingDate,
                 "bookingTime": bookingTime,
                 "bookingAddress": bookingAddress,
@@ -222,7 +275,7 @@ class labTestController {
                 // set for sub-city radiology carts, cleared when a lab/branch is chosen
                 "subCityId": subCityId ? Number(subCityId) : null
             }
-            const result = await LabTestService.updateCart(cartId, updateData);
+            const result = await LabTestService.updateCart(cartId, updateData, req.user.id);
             if (result[0] === 0) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND,messages.cartNotFound );
             }
@@ -248,6 +301,9 @@ class labTestController {
         const cartId = req.params.cartId;
     
         try {
+            if (!(await LabTestService.getOwnedCart(cartId, req.user.id))) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.cartNotFound);
+            }
             const data = await LabTestService.getLabDetail(cartId);
             const cartDetails = await LabTestService.getCartDetailsByCart(cartId);
 
@@ -293,6 +349,31 @@ class labTestController {
         //console.log(req.body,"==== payment");
         try {
             const { cartId, orderId, status, response } = req.body;
+            // only the logged-in patient's own order
+            const order = await LabOrder.findOne({
+                where: { id: orderId, patientId: req.user.id, isDeleted: false },
+                attributes: ['id', 'paymentStatus'],
+            });
+            if (!order) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
+            if (status != "success" && status != "failed") {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.paymentFailed);
+            }
+            if (status == "success") {
+                // never trust the app: the razorpay signature must match the razorpay order created for this lab order
+                const verified = await LabTestService.verifyLabOrderPayment(order.id, response);
+                if (!verified) {
+                    return CommonHelper.sendError(res, STATUS_CODE.HTTP_402_PAYMENT_REQUIRED, messages.paymentFailed, {});
+                }
+                if (order.paymentStatus == "paid") {
+                    await LabTestService.removeCart(cartId, req.user.id);
+                    return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.bookingConfirmed);
+                }
+            } else if (order.paymentStatus == "paid") {
+                // a failed attempt must not undo a completed payment
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_402_PAYMENT_REQUIRED, messages.paymentFailed, {});
+            }
             let updateData;
             if(status == "failed"){
                 updateData = {
@@ -319,7 +400,7 @@ class labTestController {
             //     return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND,messages.labOrderNotFound );
             // }
             if(status == "success"){
-                await LabTestService.removeCart(cartId);
+                await LabTestService.removeCart(cartId, req.user.id);
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.bookingConfirmed);
             }else{
                 //return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Payment failed");
@@ -339,9 +420,18 @@ class labTestController {
             let updateData; 
             let response;  
             if(razorpay_payment_id!=''){
-               const orderDetail = await LabTestService.getOrderDetailsByRazorpayOrder(razorpay_order_id);              
+               // razorpay callback without a login: the signature is the only proof of payment
+               if (!LabTestService.verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
+                   return CommonHelper.sendError(res, STATUS_CODE.HTTP_402_PAYMENT_REQUIRED, messages.paymentFailed, {});
+               }
+               const orderDetail = await LabTestService.getOrderDetailsByRazorpayOrder(razorpay_order_id);
+               if (!orderDetail) {
+                   return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+               }
                const { id } = orderDetail;
-               console.log(id);
+               if (orderDetail.paymentStatus == "paid") {
+                   return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.bookingConfirmed);
+               }
              //  let orderId = id;
                updateData = {
                 "isPaid": true,
@@ -354,7 +444,7 @@ class labTestController {
                 }
             }     
            
-            if(razorpay_payment_id != ""){
+            if(razorpay_payment_id){
                // await LabTestService.removeCart(cartId);
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.bookingConfirmed);
             }else{
@@ -369,13 +459,18 @@ class labTestController {
     
     static async purchaseLabTest(req, res) {
         try {
-            const { totalPrice, cartId, orderId } = req.body;
+            // totalPrice sent by the app is ignored, the amount comes from the order items in the database
+            const { cartId, orderId } = req.body;
             const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
-            const labOrderDetail = await LabOrder.findOne({ 
-                where: { id: orderId },
+            const labOrderDetail = await LabOrder.findOne({
+                where: { id: orderId, patientId, isDeleted: false },
                 attributes: ['uniqueBookingId', 'paymentStatus', 'orderStatus'],
             });
             if(!labOrderDetail){
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
+            const totalPrice = await LabTestService.getPayableTotal(orderId);
+            if (totalPrice === null) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
             }
             if(labOrderDetail.uniqueBookingId != null && labOrderDetail.paymentStatus == "unpaid" && labOrderDetail.orderStatus == "pending"){
@@ -399,7 +494,7 @@ class labTestController {
                     if (result[0] === 0) {
                         return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND,messages.labOrderNotFound );
                     }
-                    await LabTestService.removeCart(cartId);
+                    await LabTestService.removeCart(cartId, req.user.id);
                     return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.bookingConfirmed, { uniqueBookingId });
                 }else{ // When it's paid
                     const updateData = {
@@ -454,13 +549,18 @@ class labTestController {
 
     static async purchaseLabTestMobile(req, res) {
         try {
-            const { totalPrice, cartId, orderId } = req.body;
+            // totalPrice sent by the app is ignored, the amount comes from the order items in the database
+            const { cartId, orderId } = req.body;
             const patientId = req.user.id; // always the logged-in user, never a patientId sent by the app
-            const labOrderDetail = await LabOrder.findOne({ 
-                where: { id: orderId },
+            const labOrderDetail = await LabOrder.findOne({
+                where: { id: orderId, patientId, isDeleted: false },
                 attributes: ['uniqueBookingId', 'paymentStatus', 'orderStatus'],
             });
             if(!labOrderDetail){
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
+            const totalPrice = await LabTestService.getPayableTotal(orderId);
+            if (totalPrice === null) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
             }
             if(labOrderDetail.uniqueBookingId != null && labOrderDetail.paymentStatus == "unpaid" && labOrderDetail.orderStatus == "pending"){
@@ -484,7 +584,7 @@ class labTestController {
                     if (result[0] === 0) {
                         return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND,messages.labOrderNotFound );
                     }
-                    await LabTestService.removeCart(cartId);
+                    await LabTestService.removeCart(cartId, req.user.id);
                     return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.bookingConfirmed, { uniqueBookingId });
                 }else{ // When it's paid
                     const updateData = {
@@ -534,14 +634,12 @@ class labTestController {
     }
 
      // redcliff aloc number
-    static async getRedcliffAloc(req, res){     
-        console.log("lkllk");
-        try {    
-            //const address = await LabTestService.getLabTestAddress(req.query.id);  
-            //let state = address.state; 
-            //let city = address.city;   
+    static async getRedcliffAloc(req, res){
+        try {
+            //const address = await LabTestService.getLabTestAddress(req.query.id);
+            //let state = address.state;
+            //let city = address.city;
             let areaString = req.query.area  
-             console.log("lkllk",areaString);
             const redcliff_aloc = await LabTestService.getRedcliffAloc(areaString);          
             // latitudae and langitude
             const derdata = redcliff_aloc.data;   
@@ -554,8 +652,7 @@ class labTestController {
     static async getBookingSlot(req, res){
         try {    
             const {aloc,collection_date} = req.body;
-            const latLong = await LabTestService.getRedcliffLatLong(aloc);
-            console.log(latLong.data);          
+            const latLong = await LabTestService.getRedcliffLatLong(aloc);          
             const lat = latLong.data.latitude;
             const long = latLong.data.longitude;
             const slotData = await LabTestService.getRedcliffCollectionSlot(collection_date,lat,long);
@@ -569,8 +666,9 @@ class labTestController {
     // Create lab booking
     static async createRedcliffBooking(req, res){
         try {    
-            const {order_id,patient_id} = req.body;                  
-            const slotData = await LabTestService.createBookingRedcliff(order_id,patient_id);
+            const {order_id} = req.body;
+            // only the logged-in patient's own order (patient_id from the app is ignored)
+            const slotData = await LabTestService.createBookingRedcliff(order_id,req.user.id);
             const slots = slotData;         
            // return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully", { slots });
             return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully", { slots });
@@ -583,9 +681,8 @@ class labTestController {
     // get redcliff report
     static async redCliffReport(req,res){
           try {    
-            const data= req.body;
-            console.log("webhook ===",data);
-            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully", { data });
+            // payload is patient data, not logged and not echoed back
+            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully");
         } catch (error) {
             console.log(error.message);
             return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
@@ -595,9 +692,8 @@ class labTestController {
       // get lab test report from redcliff 
     static async getRedcliffReport(req,res){
           try {    
-            const data= req.body;
-            console.log("webhook ===",data);
-            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully", { data });
+            // payload is patient data, not logged and not echoed back
+            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "Data Fetched Successfully");
         } catch (error) {
             console.log(error.message);
             return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
@@ -647,7 +743,11 @@ class labTestController {
     // check payment for call
     static async checkCallPaymentStatus(req,res){
         try {    
-            const { patient_id, company_id } = req.query;
+            const { company_id } = req.query;
+            const patient_id = req.user.id;
+            if (!(await LabTestService.isPatientCompany(patient_id, company_id))) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, "Invalid company");
+            }
            // console.log(req.body);
            // const checkPatientForCall = await LabTestService.checkPatientForCall(patient_id, company_id);
            const check_pament_is_required = await LabTestService.checkPamentRequired(patient_id, company_id);
@@ -671,12 +771,19 @@ class labTestController {
     // post payment for call 
     static async postPaymentCall(req,res){
          try {    
-            const { patient_id, company_id, total_price, call_type, call_date, call_time } = req.body;
+            const { company_id, total_price, call_type, call_date, call_time } = req.body;
+            const patient_id = req.user.id; // always the logged-in user
+            if (!(await LabTestService.isPatientCompany(patient_id, company_id))) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, "Invalid company");
+            }
            // console.log("body", req.body)
             const checkPatientForCall = await LabTestService.postPayemntPatientForCall(patient_id, company_id,call_type,total_price, call_date, call_time);
         
-            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Data has been submitted", { checkPatientForCall });       
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Data has been submitted", { checkPatientForCall });
         } catch (error) {
+            if (error.statusCode) {
+                return CommonHelper.sendError(res, error.statusCode, error.message);
+            }
             console.log(error.message);
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
@@ -686,6 +793,27 @@ class labTestController {
         //console.log(req.body,"==== payment");
         try {
             const {orderId, status, response } = req.body;
+            // only the logged-in patient's own call payment
+            const callPayment = await LabTestService.getOwnedCallPayment(orderId, req.user.id);
+            if (!callPayment) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "Payment not found");
+            }
+            if (status != "success" && status != "failed") {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.paymentFailed);
+            }
+            if (status == "success") {
+                // the razorpay signature must match the razorpay order created for this call payment
+                const payment = response && typeof response === 'object' ? response : {};
+                const verified = !!callPayment.razorpay_order_id
+                    && callPayment.razorpay_order_id === payment.razorpay_order_id
+                    && LabTestService.verifyRazorpaySignature(payment.razorpay_order_id, payment.razorpay_payment_id, payment.razorpay_signature);
+                if (!verified) {
+                    return CommonHelper.sendError(res, STATUS_CODE.HTTP_402_PAYMENT_REQUIRED, messages.paymentFailed, {});
+                }
+            } else if (callPayment.payment_status == 'Paid') {
+                // a failed attempt must not undo a completed payment
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_402_PAYMENT_REQUIRED, messages.paymentFailed, {});
+            }
             let updateData;
             //const orderId = response.order_id;
             if(status == "failed"){
@@ -727,8 +855,8 @@ class labTestController {
     // coupon verify
     static async verifyCallCoupan(req, res){
          try {
-            const { patient_id, coupon_code} = req.body;
-            let updateData;
+            const { coupon_code } = req.body;
+            const patient_id = req.user.id; // only the logged-in patient's coupons
             const result = await LabTestService.checkCouponCode(patient_id,coupon_code);
             
             if(result){
@@ -740,15 +868,23 @@ class labTestController {
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "No coupon found",{result});
             }
         } catch (error) {
+            if (error.statusCode) {
+                return CommonHelper.sendError(res, error.statusCode, error.message);
+            }
             console.log(error.message)
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         } 
     }
     // get lab item with code 
      static async labtestNotification(req, res){
-        const { patient_id, status} = req.body;
-        const result = await LabTestService.sentCareNavigatorNotification(patient_id,status);
-         return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "No coupon found",{result});
+        try {
+            const { status } = req.body;
+            // always the logged-in patient, never a patient_id sent by the app
+            const result = await LabTestService.sentCareNavigatorNotification(req.user.id,status);
+            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "No coupon found",{result});
+        } catch (error) {
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+        }
      }
     // reschedule lab
     static async labReschedule(req, res){

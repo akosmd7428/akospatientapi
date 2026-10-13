@@ -33,6 +33,19 @@ class HelpService {
     return patient;
   }
 
+  static async getPatientDetailsById(id) {
+    const patient = await Patient.findOne({
+      where: { id },
+      attributes: ['first_name', 'last_name', 'email', 'phone'],
+    });
+
+    if (!patient) {
+      throw new Error('Patient not found');
+    }
+
+    return patient;
+  }
+
   static async getCareNavigatorDetailsByEmail(email) {
     const careNavigator = await CareNavigator.findOne({
       where: { email },
@@ -47,12 +60,10 @@ class HelpService {
   }
 
   static async getHrDetailsByEmail(email) {
-    console.log(email);
     const hrDetails = await Hr.findOne({
       where: { email },
       attributes: ['name', 'email', 'phone'],
     });
-    console.log(hrDetails);
     if (!hrDetails) {
       throw new Error('hr not found');
     }

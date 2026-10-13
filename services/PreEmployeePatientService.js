@@ -829,9 +829,10 @@ class PreEmployeePatientService {
                 // const data = await Patient.update(updateData, { 
                 //     where: { id: patientId } 
                 // });
-                let query = ` update patient set is_active =:status where id=:patientId`;               
+                let query = ` update patient set is_active =:status where id=:patientId and employer_id=:companyId`;               
                 const replacements = {
                     status:status,
+                    companyId:companyId,
                     patientId:patientId,                     
                 }
                 const [userDetails] = await sequelizeDB1.query(query, {
@@ -1192,7 +1193,7 @@ class PreEmployeePatientService {
                 FROM 
                     preemployeepatient pe              
                 WHERE 
-                 pe.companyId IN (${careCompanyIds})
+                 pe.companyId IN (:careCompanyIds)
                
             `;    
              // pe.companyId = :companyId 
@@ -1224,6 +1225,7 @@ class PreEmployeePatientService {
            
             const replacements = {
                // companyId:companyId,
+                careCompanyIds,
          
             };
             replacements.status = status;
@@ -1242,6 +1244,15 @@ class PreEmployeePatientService {
             throw new Error(`Error fetching lab orders: ${error.message}`);
         }
     };
+    // pre employee row when it belongs to one of the given companies
+    static async getPreEmployeeInCompanies(id, companyIds) {
+        const preEmployeeId = Number(id);
+        if (!Number.isInteger(preEmployeeId) || preEmployeeId < 1) return null;
+        return PreEmployeePatient.findOne({
+            where: { id: preEmployeeId, companyId: { [Op.in]: companyIds } },
+            attributes: ['id', 'companyId'],
+        });
+    }
     // get details of the pre employee
     static async getPreempDetailsByEmail(email) {
         const preEmp = await Patient.findOne({

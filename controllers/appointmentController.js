@@ -5,10 +5,14 @@ const { STATUS_CODE } = require('../config/constant');
 const { LIVE_MCHEMIST_URL, APPOINTMENT_STATUS } = require('../config/secret');
 const labTestService = require('../services/labTestService');
 const VitalMonitoringService = require('../services/vitalMonitoringService');
+const PatientService = require('../services/patientService');
+const Appointment = require('../models/appointmentModel');
 class AppointmentController {
     static async bookAppointment(req, res, next) {
         try {
-            const { patientId, doctorId, date, time, is_paid} = req.body;
+            const { doctorId, date, time, is_paid} = req.body;
+            // appointments are always booked for the logged in patient
+            const patientId = req.user.id;
             const appointmentData = {
                 patientId,
                 doctorId,
@@ -29,7 +33,8 @@ class AppointmentController {
 
     static async checkAppointmentStatus(req, res, next){
         try {
-            const { patientId, doctorId, date, time, is_paid} = req.body;            
+            const { doctorId, date, time, is_paid} = req.body;
+            const patientId = req.user.id;
             const rn = await AppointmentService.checkAppointment(patientId, doctorId, date, time,is_paid);
             if(rn === 1){
                  return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.noAppointmentsFound, {  });
@@ -212,6 +217,10 @@ class AppointmentController {
     static async rescheduleAppointment(req, res) {
         try {
             const { appointmentId, date, time } = req.body;
+            const appointment = await Appointment.findOne({ where: { id: appointmentId, patientId: req.user.id } });
+            if (!appointment) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.noAppointmentsFound);
+            }
             const updatedAppointment = await AppointmentService.rescheduleAppointment(appointmentId, date, time);
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.appointmentReschedule, { updatedAppointment });
@@ -223,6 +232,10 @@ class AppointmentController {
     static async cancelAppointment(req, res) {
         try {
             const { appointmentId } = req.body;
+            const appointment = await Appointment.findOne({ where: { id: appointmentId, patientId: req.user.id } });
+            if (!appointment) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.noAppointmentsFound);
+            }
             const updatedAppointment = await AppointmentService.cancelAppointment(appointmentId);
             
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.appointmentCancelled, { updatedAppointment });
@@ -237,6 +250,9 @@ class AppointmentController {
             const patientId = req.user.id;
 
             const appointmentDetails = await AppointmentService.getAppointmentDetails(appointmentId, patientId);
+            if (!appointmentDetails) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.noAppointmentsFound);
+            }
 
             // if (!appointmentDetails) {
             //     return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.serverError, "Appointment not found");
@@ -298,7 +314,8 @@ class AppointmentController {
     static async getMedicalRecords(req, res, next) {
         try {
             const patientId = req.user.id;
-            const { companyId } = req.params;
+            // the care plan name is only looked up for a company the patient is connected to
+            const companyId = (await PatientService.isPatientConnectedToCompany(patientId, req.params.companyId)) ? req.params.companyId : null;
 
             const { patientDetails, carePlan, appointments, files } = await AppointmentService.getMedicalRecords(patientId, companyId);
             const getLabTestsListByPatient = await labTestService.getLabTestsListByPatient(patientId);
@@ -352,8 +369,8 @@ class AppointmentController {
 
     static async fetchCallDetails(req, res, next) {
         try {
-            const {patientId} = req.body;
-            const data = await AppointmentService.fetchDoctorIds(patientId);
+            // the patientId in the body is ignored, call details are only for the logged in patient
+            const data = await AppointmentService.fetchDoctorIds(req.user.id);
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { data });
         } catch (error) {

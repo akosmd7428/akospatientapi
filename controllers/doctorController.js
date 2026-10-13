@@ -2,12 +2,17 @@ const DoctorService = require('../services/doctorService');
 const { STATUS_CODE } = require('../config/constant');
 const { messages } = require('../config/language');
 const CommonHelper = require('../helpers/commonHelper');
+const PatientService = require('../services/patientService');
 
 class DoctorController {
     static async getDoctors(req, res) {
         try {
             const { employer_id } = req.params;
             const { search } = req.query;
+            // only the doctors of a company the logged in patient is connected to
+            if (!(await PatientService.isPatientConnectedToCompany(req.user.id, employer_id))) {
+                return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.doctorsFetched, { doctors: [] });
+            }
             const doctors = await DoctorService.getDoctorsByEmployer(employer_id, search);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.doctorsFetched, { doctors });
         } catch (error) {

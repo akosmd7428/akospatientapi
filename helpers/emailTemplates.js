@@ -24,10 +24,18 @@ const esc = (value) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+// links in emails must be plain http(s) urls, anything else (javascript:, data:) is dropped
+const safeUrl = (value) => (/^https?:\/\//i.test(String(value ?? '').trim()) ? String(value).trim() : '#');
+
+// subjects are mail headers, a value must never break onto a new header line
+const headerText = (value) => String(value ?? '').replace(/[\r\n]+/g, ' ');
+
 const paragraph = (html) =>
   `<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:${BRAND.text};">${html}</p>`;
 
-const button = (label, href) => `
+const button = (label, link) => {
+  const href = safeUrl(link);
+  return `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px;">
     <tr>
       <td style="border-radius:6px;background:${BRAND.primary};">
@@ -42,6 +50,7 @@ const button = (label, href) => `
     If the button doesn't work, copy and paste this link into your browser:<br/>
     <a href="${esc(href)}" style="color:${BRAND.primary};word-break:break-all;">${esc(href)}</a>
   </p>`;
+};
 
 // Key/value box, e.g. appointment date & time or contact details
 const detailsTable = (rows) => `
@@ -111,7 +120,7 @@ const layout = ({ title, preheader = '', body, signOff = `Thank you!<br/><strong
 </html>`;
 
 const build = (subject, title, body, preheader, signOff) => ({
-  subject,
+  subject: headerText(subject),
   html: layout({ title, preheader: preheader || title, body, signOff }),
 });
 
@@ -599,7 +608,7 @@ const adminRequest = ({ subject, title, intro, details, message }) =>
   build(
     subject,
     title || subject,
-    paragraph(intro || 'A new request has been submitted with the following details:') +
+    paragraph(esc(intro) || 'A new request has been submitted with the following details:') +
       detailsTable([...details, ['Message', message]])
   );
 

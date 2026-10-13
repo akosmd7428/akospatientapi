@@ -108,10 +108,11 @@ const getCarePlanDetailsByCompanyId = async (companyId, patientId) => {
             FROM planBenefits
             WHERE 
                 isActive = true
-                AND carePlanId IN (${carePlanIds.join(',')});
+                AND carePlanId IN (:carePlanIds);
         `;
 
         benefitsResults = await sequelizeDB1.query(benefitsQuery, {
+            replacements: { carePlanIds },
             type: sequelizeDB1.QueryTypes.SELECT,
         });
     }

@@ -1,9 +1,12 @@
 const puppeteer = require('puppeteer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const generatePdf = async (htmlContent, headerContent, footerContent, prescriptionUniqueId) => {
-    const fileName = `prescription_${prescriptionUniqueId}.pdf`;
+    // the pdf is served from the public assets folder, a random suffix keeps the url from being guessed from the 5 digit prescription number
+    const safeId = String(prescriptionUniqueId).replace(/[^a-zA-Z0-9_-]/g, '');
+    const fileName = `prescription_${safeId}_${crypto.randomBytes(16).toString('hex')}.pdf`;
     const filePath = path.join(__dirname, '../assets/prescriptions', fileName);
 
     // Ensure the directory exists
@@ -12,14 +15,27 @@ const generatePdf = async (htmlContent, headerContent, footerContent, prescripti
         fs.mkdirSync(dir, { recursive: true });
     }
 
+    let browser;
     try {
         // Launch a headless browser with explicit path to Chrome and --no-sandbox flag
-        const browser = await puppeteer.launch({
+        browser = await puppeteer.launch({
             executablePath: '/usr/bin/google-chrome', // Adjust this path if necessary
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox'] // Add these flags
         });
         const page = await browser.newPage();
+
+        // the html is static, no scripts and no loading of local files or plain http resources
+        await page.setJavaScriptEnabled(false);
+        await page.setRequestInterception(true);
+        page.on('request', (request) => {
+            const url = request.url();
+            if (url.startsWith('https://') || url.startsWith('data:') || url === 'about:blank') {
+                request.continue();
+            } else {
+                request.abort();
+            }
+        });
 
         // Set page content
         await page.setContent(htmlContent);
@@ -41,9 +57,6 @@ const generatePdf = async (htmlContent, headerContent, footerContent, prescripti
             }
         });
 
-        // Close the browser
-        await browser.close();
-
         // Write the PDF buffer to file
         fs.writeFileSync(filePath, pdfBuffer);
 
@@ -51,6 +64,8 @@ const generatePdf = async (htmlContent, headerContent, footerContent, prescripti
     } catch (error) {
         console.error('Error generating PDF:', error);
         throw error;
+    } finally {
+        if (browser) await browser.close();
     }
 };
 

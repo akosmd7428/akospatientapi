@@ -9,7 +9,6 @@ class DataController {
     static async getData(req, res) {
         try {
             const { type } = req.params;
-            console.log(req.params);
             const data = await DataService.getAll(type);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { data });
         } catch (error) {
@@ -54,9 +53,12 @@ class DataController {
 
             // Respond with the file URL
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.fileUploaded, { fileUrl });
-            
+
         } catch (error) {
-            return res.status(500).json({ error: error.message });
+            if (error.isValidation) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message, error.message);
+            }
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
         }
     }
 
@@ -116,7 +118,9 @@ class DataController {
             return rows;
         } else {            
             // Handle the case where group_id has multiple values
-            const groupIds = group_id.map(group => group.id).join(",");
+            // ints only, passed as an array so the IN list is bound value by value
+            const groupIds = group_id.map(group => parseInt(group.id, 10)).filter(Number.isInteger);
+            if (!groupIds.length) return [];
             
             const sql = `
                     SELECT patient.gender, 
@@ -177,7 +181,9 @@ class DataController {
     
     static async getTalkToDoctorCallListApi(req, res){      
         try {
-            const { patientId, call_id } = req.body;
+            const { call_id } = req.body;
+            // a patient can only look up their own waiting room entry
+            const patientId = req.user.id;
             const sql = `
                     SELECT patient.gender, 
                         patientDetails.age, 

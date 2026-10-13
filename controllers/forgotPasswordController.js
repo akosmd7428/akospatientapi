@@ -18,19 +18,35 @@ class ForgotPasswordController {
       const message = await ForgotPasswordService.verifyOtp(req.body.email, req.body.otp);
       CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, message);
     } catch (error) {
-      CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.invalidOtp, error.message);
+      CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.invalidOtp);
     }
   }
 
+  // forgot password flow, needs the otp of this email to have been verified just before
   static async changePassword(req, res, next) {
-    const getRole = req.header("role") || null;
-    //console.log(getRole);
     try {
-      const message = await ForgotPasswordService.changePassword(req.body.email, req.body.newPassword,getRole);
+      const message = await ForgotPasswordService.resetPassword(req.body.email, req.body.newPassword);
       CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, message);
     } catch (error) {
-      CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.passwordChangeError, error.message);
+      ForgotPasswordController.sendChangeError(res, error);
     }
+  }
+
+  // logged in user changes its own password, the email in the body is ignored
+  static async changeOwnPassword(req, res, next) {
+    try {
+      const message = await ForgotPasswordService.changeOwnPassword(req.user, req.body.newPassword);
+      CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, message);
+    } catch (error) {
+      ForgotPasswordController.sendChangeError(res, error);
+    }
+  }
+
+  static sendChangeError(res, error) {
+    if (error.isClientError) {
+      return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
+    }
+    return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.passwordChangeError, error.message);
   }
 }
 

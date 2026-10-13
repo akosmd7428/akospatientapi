@@ -5,6 +5,23 @@ const { emailHelperSMTP } = require('../helpers/emailHelperSMTP'); // Adjust the
 const EmailTemplates = require('./emailTemplates');
 const PatientService = require('../services/patientService');
 const { shortenUrl } = require('../services/bitlyService');
+const { PATIENT_BACKEND_URL } = require('../config/secret');
+
+// every value rendered into the pdf html comes from request/db data, escape it so it can't inject markup
+const esc = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+// signature is only rendered when it is an inline image or an https url, never file:// or plain http
+const safeImageSrc = (src) => {
+    const value = String(src ?? '').trim();
+    if (/^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(value)) return value;
+    if (/^https:\/\//i.test(value)) return value;
+    return '';
+};
 
 const generatePrescription = async (data) => {
     const { 
@@ -19,12 +36,12 @@ const generatePrescription = async (data) => {
             <tbody>
                 <tr>
                     <td align="left" style="text-align:left;width:10%;">
-                        <img width="150px" src="https://patientportalapi.akosmd.in/assets/akosLogo.png" alt="logo">
+                        <img width="150px" src="${esc(PATIENT_BACKEND_URL)}/assets/akosLogo.png" alt="logo">
                     </td>
                     <td style="width:40%;"></td>
                     <td align="right" style="text-align:right;width:50%;">
                         <h3 style="color: #444; font-size: 16px; font-weight: 400; margin: 8px 0;">
-                            <strong>Prescription No.:</strong> ${details.prescriptionUniqueId}
+                            <strong>Prescription No.:</strong> ${esc(details.prescriptionUniqueId)}
                         </h3>
                         <h3 style="color: #444; font-size: 16px; font-weight: 400; margin: 8px 0;">
                             <strong>Prescription Date:</strong> ${new Date().toISOString().split('T')[0]}
@@ -100,12 +117,12 @@ const generatePrescription = async (data) => {
                     <tbody>
                         <tr>
                             <td align="left" style="text-align:left;width:10%;">
-                                <img width="180px" src="https://patientportalapi.akosmd.in/assets/akosLogo.png" alt="logo">
+                                <img width="180px" src="${esc(PATIENT_BACKEND_URL)}/assets/akosLogo.png" alt="logo">
                             </td>
                             <td style="width:40%;"></td>
                             <td align="right" style="text-align:right;width:50%;">
                                 <h3 style="color: #444; font-size: 16px; font-weight: 400; margin: 8px 0;">
-                                    <strong>Prescription No.:</strong> ${details.prescriptionUniqueId}
+                                    <strong>Prescription No.:</strong> ${esc(details.prescriptionUniqueId)}
                                 </h3>
                                 <h3 style="color: #444; font-size: 16px; font-weight: 400; margin: 8px 0;">
                                     <strong>Prescription Date:</strong> ${new Date().toISOString().split('T')[0]}
@@ -124,13 +141,13 @@ const generatePrescription = async (data) => {
                                     Patient
                                 </h3>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                                    <strong>Name:</strong> ${details.patient.name}
+                                    <strong>Name:</strong> ${esc(details.patient.name)}
                                 </h4>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                                    <strong>Age:</strong> ${details.patient.age} years
+                                    <strong>Age:</strong> ${esc(details.patient.age)} years
                                 </h4>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                                    <strong>Gender:</strong> ${details.patient.gender}
+                                    <strong>Gender:</strong> ${esc(details.patient.gender)}
                                 </h4>
                             </td>
                             <td></td>
@@ -139,13 +156,13 @@ const generatePrescription = async (data) => {
                                     Doctor
                                 </h3>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                                    <strong>Name:</strong> ${details.doctor.name}
+                                    <strong>Name:</strong> ${esc(details.doctor.name)}
                                 </h4>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                                    <strong>Speciality:</strong> ${details.doctor.speciality}
+                                    <strong>Speciality:</strong> ${esc(details.doctor.speciality)}
                                 </h4>
                                 <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                                    <strong>Reg. No:</strong> ${details.doctor.reg_no || 'N/A'}
+                                    <strong>Reg. No:</strong> ${esc(details.doctor.reg_no || 'N/A')}
                                 </h4>
                             </td>
                         </tr>
@@ -155,32 +172,32 @@ const generatePrescription = async (data) => {
             <section style="width: 100%; height: auto; border-bottom: 2px solid #444; padding: 10px 0;">
                 <div style="width: 100%; margin-bottom: 10px;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Chief Complaints: </span> ${details.chiefComplaints}
+                        <span style="font-weight: 700;">Chief Complaints: </span> ${esc(details.chiefComplaints)}
                     </h4>
                 </div>
                 <div style="width: 100%; margin-bottom: 10px;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Diagnosis: </span> ${details.diagnosis}
+                        <span style="font-weight: 700;">Diagnosis: </span> ${esc(details.diagnosis)}
                     </h4>
                 </div>
                 <div style="width: 100%; margin-bottom: 10px;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Relevant Points From History: </span> ${details.previousHistory}
+                        <span style="font-weight: 700;">Relevant Points From History: </span> ${esc(details.previousHistory)}
                     </h4>
                 </div>
                 <div style="width: 100%; margin-bottom: 10px;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Lab Findings:</span> ${details.labFindings}
+                        <span style="font-weight: 700;">Lab Findings:</span> ${esc(details.labFindings)}
                     </h4>
                 </div>
                 <div style="width: 100%;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Suggested Investigations:</span> ${details.suggestedInvestigations}
+                        <span style="font-weight: 700;">Suggested Investigations:</span> ${esc(details.suggestedInvestigations)}
                     </h4>
                 </div>
                 <div style="width: 100%; margin-bottom: 10px;">
                     <h4 style="color: #444; font-size: 16px; font-weight: 400; margin: 5px 0;">
-                        <span style="font-weight: 700;">Special Instructions: </span> ${details.specialInstructions}
+                        <span style="font-weight: 700;">Special Instructions: </span> ${esc(details.specialInstructions)}
                     </h4>
                 </div>
             </section>
@@ -202,31 +219,29 @@ const generatePrescription = async (data) => {
                         ${medicines.map((medicine, index) => `
                             <tr style="text-align: left; color: #444; font-weight: 400;">
                                 <td style="text-align: left; color: #444; font-weight: 400;">${index + 1}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.medicineName}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.frequency}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.duration}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.strength}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.drugForm}</td>
-                                <td style="text-align: left; color: #444; font-weight: 400;">${medicine.instructions}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${esc(medicine.medicineName)}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${esc(medicine.frequency)}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${esc(medicine.duration)}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${esc(medicine.strength)}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${esc(medicine.drugForm)}</td>
+                                <td style="text-align: left; color: #444; font-weight: 400;">${esc(medicine.instructions)}</td>
                             </tr>
                         `).join('')}
                     </tbody>
                 </table>
                 <div style="margin-top: 30px;">
                     <div style="width: 100px; height: auto; background-color: #efefef; display: flex; justify-content: center; align-items: center;">
-                        <img src="${details.signature}" alt="signature" style="max-width: 100%; height: auto;">
+                        <img src="${esc(safeImageSrc(details.signature))}" alt="signature" style="max-width: 100%; height: auto;">
                     </div>
-                    <h4 style="text-align: left; color: #444; font-weight: 400; margin: 15px 0;">(${details.doctor.name})</h4>
+                    <h4 style="text-align: left; color: #444; font-weight: 400; margin: 15px 0;">(${esc(details.doctor.name)})</h4>
                 </div>
             </section>
         </section>
     </body>
     </html>
     `;
-    
-    module.exports = htmlContent;
-    
-    
+
+
     try {
         // Generate the PDF
         let pdfLink = '';
@@ -240,7 +255,7 @@ const generatePrescription = async (data) => {
             }
         });
         // Wait for the PDF to be generated
-        pdfLink = `https://patientportalapi.akosmd.in/assets/prescriptions/${generatedFileName}`;
+        pdfLink = `${PATIENT_BACKEND_URL}/assets/prescriptions/${generatedFileName}`;
         // pdfLink = `file:///var/www/html/akosmd_patient/assets/prescriptions/${generatedFileName}`;
         // const shortURL = await shortenUrl(pdfLink);
         console.log('PDF generated successfully:', pdfLink);

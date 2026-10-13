@@ -16,12 +16,53 @@ const PatientFolder = require('../models/patientFoldersModel');
 const Doctor = require('../models/doctorModel');
 const PatientFile = require('../models/patientFileModel');
 const PreEmployeePatientService = require('../services/PreEmployeePatientService');
+const { sequelizeDB1 } = require('../config/sequelize');
+const { QueryTypes } = require('sequelize');
+
+const toId = (value) => {
+    const id = Number(value);
+    return Number.isInteger(id) && id > 0 ? id : null;
+};
+
+// a patient belongs to the care navigator when its employer is one of req.careCompanyIds
+const patientInScope = async (patientId, careCompanyIds) => {
+    const id = toId(patientId);
+    if (!id) return false;
+    const [row] = await sequelizeDB1.query(
+        'SELECT id FROM patient WHERE id = :id AND employer_id IN (:careCompanyIds) LIMIT 1',
+        { replacements: { id, careCompanyIds }, type: QueryTypes.SELECT }
+    );
+    return !!row;
+};
+
+// returns the appointment when its patient is in the care navigator's companies
+const appointmentInScope = async (appointmentId, careCompanyIds) => {
+    const id = toId(appointmentId);
+    if (!id) return null;
+    const [row] = await sequelizeDB1.query(
+        `SELECT a.id, a.patientId, a.doctorId FROM appointments a JOIN patient p ON p.id = a.patientId
+         WHERE a.id = :id AND (p.employer_id IN (:careCompanyIds) OR p.companyId IN (:careCompanyIds)) LIMIT 1`,
+        { replacements: { id, careCompanyIds }, type: QueryTypes.SELECT }
+    );
+    return row || null;
+};
+
+const labOrderInScope = async (orderId, careCompanyIds) => {
+    const id = toId(orderId);
+    if (!id) return false;
+    const [row] = await sequelizeDB1.query(
+        `SELECT lo.id FROM labOrders lo JOIN patient p ON p.id = lo.patientId
+         WHERE lo.id = :id AND (p.employer_id IN (:careCompanyIds) OR p.companyId IN (:careCompanyIds)) LIMIT 1`,
+        { replacements: { id, careCompanyIds }, type: QueryTypes.SELECT }
+    );
+    return !!row;
+};
 
 class CareNavigatorController {
 
     static async getProfileDetails(req, res) {
         try {
-            const userDetails = await CareNavigator.findByPk(req.user.id);
+            const userDetails = await CareNavigator.findByPk(req.user.id, { attributes: { exclude: ['password'] } });
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.careNavigatorRetrieved, { userDetails });
         } catch (error) {
             CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
@@ -51,7 +92,7 @@ class CareNavigatorController {
     static async getAppointments(req, res, next) {
         try {
             const { search, status, filter } = req.query;
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.careCompanyIds;
            
             const appointments = await AppointmentService.getAppointmentsForCareNavigator(status, search, filter,careCompanyIds);
     
@@ -163,6 +204,9 @@ class CareNavigatorController {
     static async rescheduleAppointment(req, res) {
         try {
             const { appointmentId, date, time } = req.body;
+            if (!await appointmentInScope(appointmentId, req.careCompanyIds)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "Appointment not found");
+            }
             const updatedAppointment = await AppointmentService.rescheduleAppointment(appointmentId, date, time);
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.appointmentReschedule, { updatedAppointment });
@@ -174,6 +218,9 @@ class CareNavigatorController {
     static async cancelAppointment(req, res) {
         try {
             const { appointmentId } = req.body;
+            if (!await appointmentInScope(appointmentId, req.careCompanyIds)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "Appointment not found");
+            }
             const updatedAppointment = await AppointmentService.cancelAppointment(appointmentId);
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.appointmentCancelled, { updatedAppointment });
@@ -185,6 +232,9 @@ class CareNavigatorController {
     static async approveAppointment(req, res) {
         try {
             const { appointmentId } = req.body;
+            if (!await appointmentInScope(appointmentId, req.careCompanyIds)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "Appointment not found");
+            }
             const updatedAppointment = await AppointmentService.approveAppointment(appointmentId);
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.appointmentApproved, { updatedAppointment });
@@ -196,6 +246,9 @@ class CareNavigatorController {
     static async updateAppointment(req, res) {
         try {
             const { appointmentId, status } = req.body;
+            if (!await appointmentInScope(appointmentId, req.careCompanyIds)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "Appointment not found");
+            }
             const updatedAppointment = await AppointmentService.updateAppointment(appointmentId, status, req.user.id);
             if(status == 1){
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.appointmentApproved, { updatedAppointment });
@@ -210,7 +263,7 @@ class CareNavigatorController {
     static async getAllPatients(req, res) {
         try {
             const { search, filter } = req.query;
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.careCompanyIds;
             const userDetails = await PatientService.getAllPatients(search, filter,careCompanyIds);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.patientDetailsFetched, { userDetails });
         } catch (error) {
@@ -221,7 +274,7 @@ class CareNavigatorController {
     static async getMyPatients(req, res) {
         try {
             const { search, filter } = req.query;
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.careCompanyIds;
             //Update count to zero 
             await CareNavigator.update(
                 { totalAssignedPatient: 0 },
@@ -237,7 +290,7 @@ class CareNavigatorController {
     static async getLabTests(req, res) {
         try {
             const { status, search, filter } = req.query;
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.careCompanyIds;
             const labTests = await labTestService.getLabOrdersForCareNavigator(status, search, filter,careCompanyIds);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.patientDetailsFetched, { labTests });
         } catch (error) {
@@ -247,7 +300,7 @@ class CareNavigatorController {
 
     static async dashboard(req, res) {
         try {
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.careCompanyIds;
             let totalAssignedPatient = 0;
             const appointments = await AppointmentService.getAppointmentsForDashboard(1,careCompanyIds);
             // Process each appointment asynchronously
@@ -292,7 +345,7 @@ class CareNavigatorController {
 
     static async prescriptions(req, res) {
         try {
-            const careCompanyIds = req.header('companyId') || null;
+            const careCompanyIds = req.careCompanyIds;
             const prescriptions = await labTestService.getPrescriptionUploaded(careCompanyIds);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { prescriptions });
         } catch (error) {
@@ -303,7 +356,10 @@ class CareNavigatorController {
     static async updateLabOrder(req, res) {
 
         const { orderId, status, labId, labCityId, subCityId, labBranchId } = req.body;
-        // try {
+        try {
+            if (!await labOrderInScope(orderId, req.careCompanyIds)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
             const updateData = {
                 "orderStatus": status
             }
@@ -340,7 +396,7 @@ class CareNavigatorController {
             // shown as "Cancelled by" in the care navigator cancellation email
             let cancelledBy;
             if (status === 'cancelled') {
-                const careNavigator = await HelpService.getCareNavigatorDetailsByEmail(req.user.email).catch(() => null);
+                const careNavigator = await CareNavigator.findByPk(req.user.id, { attributes: ['name'] }).catch(() => null);
                 cancelledBy = careNavigator?.name ? `Care Navigator (${careNavigator.name})` : 'Care Navigator';
             }
             const result = await labTestService.updateLabOrder(orderId, updateData, undefined, { cancelledBy });
@@ -348,9 +404,9 @@ class CareNavigatorController {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND,messages.labOrderNotFound );
             }
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.labOrderUpdated, { result });
-        // } catch (error) {
-        //     return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
-        // }
+        } catch (error) {
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
     }
 
     static async getOrderLabs(req, res) {
@@ -358,6 +414,9 @@ class CareNavigatorController {
             const orderId = parseInt(req.params.orderId, 10);
             if (!orderId || orderId < 1) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Valid orderId is required");
+            }
+            if (!await labOrderInScope(orderId, req.careCompanyIds)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
             }
             // labs are listed for the requested city, or the order's own city by default
             const location = await labTestService.getOrderLocation(orderId);
@@ -401,6 +460,9 @@ class CareNavigatorController {
 
         const { orderId, labReportURL } = req.body;
         try {
+            if (!await labOrderInScope(orderId, req.careCompanyIds)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
             const updateData = {
                 "labReportURL": labReportURL
             }
@@ -426,9 +488,16 @@ class CareNavigatorController {
     static async sendEmail(req, res, next) {
         try {
             const { message } = req.body;
-            const { email } = req.user;
+            // message ends up html-escaped in the admin email, only accept plain text of sane length
+            if (typeof message !== 'string' || !message.trim() || message.length > 5000) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Valid message is required");
+            }
 
-            const careNavigator = await HelpService.getCareNavigatorDetailsByEmail(email);
+            // sender is the logged in care navigator
+            const careNavigator = await CareNavigator.findByPk(req.user.id, { attributes: ['name', 'email', 'phone'] });
+            if (!careNavigator) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.userNotFound);
+            }
 
             const { subject, html } = EmailTemplates.adminRequest({
                 subject: 'Care Navigator Help Request',
@@ -448,6 +517,9 @@ class CareNavigatorController {
     static async getLabOrdersByPatient(req, res) {
         try {
             const { orderId } = req.params;
+            if (!await labOrderInScope(orderId, req.careCompanyIds)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
             const labOrders = await labTestService.getLabOrdersByPatientId(orderId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.ordersFetched, { labOrders });
         } catch (error) {
@@ -459,14 +531,19 @@ class CareNavigatorController {
         try {
           const { patientId } = req.body;
           let userDetails;
+          // a care navigator can only sign in as a patient of its own companies
+          if (!await patientInScope(patientId, req.careCompanyIds)) {
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided patient Id.");
+          }
           //Login as Patient after first time
           const patient = await Patient.findOne( { where : { id : patientId } } );
           if(patient) {
-            let { token } = await AuthService.patientLogin(patient);
             userDetails = await PatientService.getPatientDetailsByEmail(patient.email, patient);
-            if (userDetails.length === 0) {
-                CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided patient Id.");
+            if (!userDetails || userDetails.length === 0) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided patient Id.");
             }
+            // plain patient token, same as a normal patient login
+            let { token } = await AuthService.patientLogin(patient);
             userDetails.currentRole = "patient";
             const loggedBy = "careNavigator";
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails, loggedBy });          
@@ -475,17 +552,24 @@ class CareNavigatorController {
           }
         } catch (error) {
           console.error(error);
-          return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
+          return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Invalid Patient Id");
         }
     }
 
     
     static async uploadPrescription(req, res, next) {
         try {
-        const { patientId, doctorId, appointmentId, prescriptionURL } = req.body;
+        const { patientId, appointmentId, prescriptionURL } = req.body;
         const prescriptionUniqueId = Math.floor(10000 + Math.random() * 90000);
         //write code to upload prescription
-        if(patientId && doctorId && appointmentId && prescriptionURL){
+        if(patientId && req.body.doctorId && appointmentId && prescriptionURL){
+            // the appointment must be this patient's and the patient in the care navigator's companies
+            const appointment = await appointmentInScope(appointmentId, req.careCompanyIds);
+            if (!appointment || Number(appointment.patientId) !== Number(patientId)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "Appointment not found");
+            }
+            // doctor comes from the appointment, not from the request
+            const doctorId = appointment.doctorId;
 
             const data = {
                 "prescriptionURL" : prescriptionURL,
@@ -521,7 +605,6 @@ class CareNavigatorController {
                 }
             }
             const patient = await Patient.findOne({where: { id: patientId} }); 
-            console.log(patient,'patient===');
             if(patient){
                 await emailHelperSMTP(null, patient.email, ...Object.values(EmailTemplates.prescriptionReady({ name: `${patient.first_name} ${patient.last_name}`, link: prescriptionURL }))); 
             }
@@ -532,15 +615,15 @@ class CareNavigatorController {
         } 
         } catch (error) {
             console.error(error);
-            return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
         }             
     }
     // get lab status for pre employee
     static async getPreEmpLabTests(req, res) {
         try {
-            const { status, search, filter,companyId } = req.query;
-            const careCompanyIds = req.header('companyId') || null;
-            const labTests = await PreEmployeePatientService.getPreEmploymentBookingDetails(companyId,status, search, filter,careCompanyIds);
+            const { status, search, filter } = req.query;
+            const careCompanyIds = req.careCompanyIds;
+            const labTests = await PreEmployeePatientService.getPreEmploymentBookingDetails(null,status, search, filter,careCompanyIds);
             return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.patientDetailsFetched, { labTests });
         } catch (error) {
             CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
@@ -550,8 +633,12 @@ class CareNavigatorController {
      // update report
      static async updateLabPreLabReport(req, res) {
         const {  status, report_url, id,report_remark } = req.body;
-        console.log(id);
          try {
+            // pre employee must belong to one of the care navigator's companies
+            const preEmployee = await PreEmployeePatientService.getPreEmployeeInCompanies(id, req.careCompanyIds);
+            if (!preEmployee) {
+                return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
+            }
             const updateData = {
                 "isActive": status                 
             }

@@ -17,6 +17,21 @@ class PatientCareTeamService {
         }
     }
 
+    // doctors (from the given list) that serve a company the patient, or its parent, is connected to
+    static async getAllowedDoctorIds(patientId, doctorIds) {
+        const rows = await sequelizeDB1.query(
+            `SELECT DISTINCT de.doctor_id AS doctorId
+             FROM patient p
+             JOIN connectedCompaniesPatient ccp ON ccp.patientId IN (p.id, p.parent_id)
+             JOIN doctor_employer de ON de.employer_id = ccp.companyId
+             WHERE p.id = :patientId
+                AND ccp.isActive = true
+                AND de.doctor_id IN (:doctorIds)`,
+            { replacements: { patientId, doctorIds }, type: QueryTypes.SELECT }
+        );
+        return rows.map(row => Number(row.doctorId));
+    }
+
     static async getCareTeam(patientId, search) {
         let query = `
             SELECT 

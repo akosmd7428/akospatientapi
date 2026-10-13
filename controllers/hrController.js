@@ -22,12 +22,29 @@ const { v4: uuidv4 } = require('uuid');
 const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const { parseCompanyIds } = require('../middleware/careNavigatorScope');
+
+// the hr row lists the companies this hr user manages, the companyId header only picks one of them.
+// returns null when the hr user is unknown/inactive or asks for a company it does not manage
+const getHrCompanyId = async (req) => {
+    const hr = await Hr.findByPk(req.user.id, { attributes: ['id', 'companyId', 'isActive'] });
+    if (!hr || hr.isActive == 0) return null;
+    const allowed = parseCompanyIds(hr.companyId);
+    if (!allowed.length) return null;
+    const header = String(req.header('companyId') ?? '').trim();
+    // no selection yet, the frontend then sends the raw company list from the profile
+    if (!header || header === String(hr.companyId).trim()) return allowed[0];
+    const requested = Number(header);
+    return allowed.includes(requested) ? requested : null;
+};
+
+const companyAccessDenied = (res) => CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, "Access denied");
+
 class HrController {
 
     static async getProfileDetails(req, res) {
         try {           
             const userDetails = await Hr.findByPk(req.user.id);
-            console.log(userDetails);
             const userProfileData = userDetails?
             {   
                 id: userDetails.id,
@@ -70,8 +87,9 @@ class HrController {
     static async createPreEmployee(req, res){
        // console.log(req.body);      
         const { name, email, phone, gender, age, dateofbirth,city, state, zip_code,companyId,type,health_check_up_date } = req.body;
-        const companyId_header= req.header('companyId');
-        try {          
+        try {
+            const companyId_header = await getHrCompanyId(req);
+            if (!companyId_header) return companyAccessDenied(res);          
             const data = {
                 "name" : name,
                 "email" : email,
@@ -105,7 +123,8 @@ class HrController {
     // get patient list
     static async getListOfPreEmployee(req, res){
         try {
-            const companyId_header= req.header('companyId');
+            const companyId_header = await getHrCompanyId(req);
+            if (!companyId_header) return companyAccessDenied(res);
             const { companyId,status,search,from_date,to_date } = req.query;      
             const userDetails = await PreEmployeePatientService.getPreEmployeeList(companyId_header,status,search); 
             const preEnroll = await PreEmployeePatientService.getStatusWisePreEnroll(companyId_header,from_date,to_date);
@@ -128,7 +147,8 @@ class HrController {
     static async getCompanyHraAssesment(req, res){
         try {
             const { companyId,year,search } = req.query;          
-            const companyId_header= req.header('companyId');
+            const companyId_header = await getHrCompanyId(req);
+            if (!companyId_header) return companyAccessDenied(res);
             const hraDetaails = await PreEmployeePatientService.getHraAssessment(companyId_header,year,search); 
             const pendingHra = await PreEmployeePatientService.getEmpPendingHra(companyId_header,year,search);
             const empMonthWise = await PreEmployeePatientService.getMonthWise(companyId_header,year,search);
@@ -147,7 +167,8 @@ class HrController {
     static async getEmpTookCall(req, res){
         try{
             const {companyId,from_date,to_date} = req.query;
-            const companyId_header= req.header('companyId');
+            const companyId_header = await getHrCompanyId(req);
+            if (!companyId_header) return companyAccessDenied(res);
             const noOfEmpTakenCall = await PreEmployeePatientService.getNoOfEmployeeTakenCall(companyId_header,from_date,to_date);
             const speciallityWise = await PreEmployeePatientService.getEmpCountBySpeciality(companyId_header,from_date,to_date);
             const data = {
@@ -163,8 +184,12 @@ class HrController {
         try {
             const  message  = 'please take hra assesment.';
             const { email } = req.query;        
-            const preEmployer = await PatientService.getProfileByEmailId(email);
-            console.log(preEmployer);
+            const companyId = await getHrCompanyId(req);
+            if (!companyId) return companyAccessDenied(res);
+            const preEmployer = typeof email === 'string' ? await PatientService.getProfileByEmailId(email) : null;
+            if (!preEmployer || Number(preEmployer.employer_id) !== companyId) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.userNotFound);
+            }
             const { subject, html } = EmailTemplates.adminRequest({
                 subject: 'HRA assesment avail',
                 intro: 'HRA assessment reminder for the following employee:',
@@ -207,7 +232,8 @@ class HrController {
     static async getCardioRecords(req, res, next) {
         try {
             const { companyId,from_date, to_date } = req.query;    
-            const companyId_header= req.header('companyId');
+            const companyId_header = await getHrCompanyId(req);
+            if (!companyId_header) return companyAccessDenied(res);
             const cardioResult = await PreEmployeePatientService.getPatientCountForCardio(companyId_header,from_date,to_date);
             const hyperResult = await PreEmployeePatientService.getPatientCountForHyper(companyId_header,from_date,to_date);
             const daibeticsResult = await PreEmployeePatientService.getPatientCountForDaibetics(companyId_header,from_date,to_date);
@@ -225,7 +251,8 @@ class HrController {
     static async getEmployeeDetails(req, res, next){
         try {
             const { companyId,search, filter,status } = req.query;    
-            const companyId_header= req.header('companyId');
+            const companyId_header = await getHrCompanyId(req);
+            if (!companyId_header) return companyAccessDenied(res);
             const employeeNewlyAdded = await PreEmployeePatientService.getEmployeeNewAdded(companyId_header);
             const employeeDisabled = await PreEmployeePatientService.getEmployeeDisable(companyId_header);
             const employeeInSystem = await PreEmployeePatientService.getEmployeeInSystem(companyId_header);
@@ -249,9 +276,17 @@ class HrController {
     // update employee status
     static async updateEmployeeStatus(req, res, next){
         try {
-            const { companyId,patientId,status } = req.body;  
-            const companyId_header= req.header('companyId');
-            const employeest = await PreEmployeePatientService.enableDisableEmployeeStatus(companyId_header,patientId,status);
+            const { patientId,status } = req.body;
+            if (![0, 1].includes(Number(status))) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Invalid status");
+            }  
+            const companyId_header = await getHrCompanyId(req);
+            if (!companyId_header) return companyAccessDenied(res);
+            const employee = await Patient.findOne({ where: { id: patientId, employer_id: companyId_header }, attributes: ['id'] });
+            if (!employee) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.userNotFound);
+            }
+            const employeest = await PreEmployeePatientService.enableDisableEmployeeStatus(companyId_header,patientId,Number(status));
             const statusUpdate = {
                 statusUpdate : true
             }
@@ -266,15 +301,14 @@ class HrController {
         // console.log(req.body);
          const { name, email, phone, gender, age, dateofbirth,city, state, zip_code,companyId } = req.body;
           try {  
-            const companyId_header= req.header('companyId');
+            const companyId_header = await getHrCompanyId(req);
+            if (!companyId_header) return companyAccessDenied(res);
             // find patient email exist or not     
             const  password = 'Akosmd@123';
             //const hashedPassword = await bcrypt.hash(password, 10);
             const hashedPassword = crypto.createHash('md5').update(password).digest('hex');
             let patientEmail = email;
-            console.log(email);
             const patientEmailExt = await Patient.findOne({ where: { email } });
-            console.log(patientEmailExt);
             if(patientEmailExt != null){ 
                 CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.serverError, 'Email is already registered.');
             }else{
@@ -332,7 +366,8 @@ class HrController {
     static async engagementOfEmployee(req, res){
         try {
             const { companyId,from_date,to_date } = req.query;  
-            const companyId_header= req.header('companyId');
+            const companyId_header = await getHrCompanyId(req);
+            if (!companyId_header) return companyAccessDenied(res);
             const totalemp = await PreEmployeePatientService.totalemp(companyId_header,from_date,to_date);
 
             const empCallTaken = await PreEmployeePatientService.takenpatientcall(companyId_header,from_date,to_date);
@@ -436,7 +471,6 @@ class HrController {
     static async sendEmail(req, res, next) {
         try {
             const { message } = req.body;
-            const { email } = req.user;
 
             const careNavigator = await HelpService.getCareNavigatorDetailsByEmail(email);
 
@@ -485,7 +519,7 @@ class HrController {
           }
         } catch (error) {
           console.error(error);
-          return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
+          return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Invalid Patient Id");
         }
     }
 
@@ -542,16 +576,22 @@ class HrController {
         } 
         } catch (error) {
             console.error(error);
-            return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
         }             
     }
 
     static async sendEmailhr(req, res, next) {
         try {
-            const { message,email } = req.body;
-           // const { email } = req.user;
-            console.log(email);
-            const hrdetails = await HelpService.getHrDetailsByEmail(email);
+            const { message } = req.body;
+            const { email } = req.user;
+            if (typeof message !== 'string' || !message.trim() || message.length > 5000) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Valid message is required");
+            }
+            // sender is the logged in hr user
+            const hrdetails = await Hr.findByPk(req.user.id, { attributes: ['name', 'email', 'phone'] });
+            if (!hrdetails) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.userNotFound);
+            }
 
             const { subject, html } = EmailTemplates.adminRequest({
                 subject: 'HR Help Request',
@@ -571,8 +611,9 @@ class HrController {
     // get hr module
      static async getUserModule(req, res, next) {
         try {        
-        const userModuleinfo = await PreEmployeePatientService.getUserModule(req.query.id);
-         const userCompanyInfo = await PreEmployeePatientService.getUserComanies(req.query.id);
+        // own modules only, the id query param is ignored
+        const userModuleinfo = await PreEmployeePatientService.getUserModule(req.user.id);
+         const userCompanyInfo = await PreEmployeePatientService.getUserComanies(req.user.id);
          const data = {userModuleinfo, userCompanyInfo}
         return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { data });
     } catch (error) {

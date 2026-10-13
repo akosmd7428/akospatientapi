@@ -43,7 +43,8 @@ class PatientController {
             }
             //Update Patient Profile Details only 
             if(req.body.age != '' && req.body.age > 17){
-                await patient.update({ first_name, last_name, email, phone, dateofbirth, gender, city, state, zip_code });
+                // email is the login identity and is read-only on the profile page, it is not changed here
+                await patient.update({ first_name, last_name, phone, dateofbirth, gender, city, state, zip_code });
                 await PatientService.createOrUpdatePatientProfile(req.body, req.user.id);
                 await patient.update({ isProfileCompleted : true, isFirstLogin : true });
             }else{
@@ -129,10 +130,12 @@ class PatientController {
                     if(dependent.age != '' && dependent.age > 0){
                         const { first_name, last_name } = getFirstAndLastName(fullname);   
                         if (id) {
-                            let existingDependent = await Patient.findByPk(id);
-                            if (existingDependent) {
-                                await existingDependent.update({ first_name, last_name, email, phone, dateofbirth, gender, city, state, zip_code });
+                            // only dependents of the logged in patient can be updated
+                            let existingDependent = await Patient.findOne({ where: { id, parent_id: req.user.id } });
+                            if (!existingDependent) {
+                                continue;
                             }
+                            await existingDependent.update({ first_name, last_name, email, phone, dateofbirth, gender, city, state, zip_code });
                         } else {
                             const newDependent = await Patient.create({ first_name, last_name, email, phone, dateofbirth, gender, city, state, zip_code, parent_id: req.user.id });
                             id = newDependent.id;
@@ -166,18 +169,17 @@ class PatientController {
 
     static async getPatientDetails(req, res) {
         const { patientEmail } = req.params;
-        console.log("pEmail",patientEmail);
 
         try {
             const patientData = await PatientService.getProfileByPatientEmail(patientEmail);
             
             if(patientData){
                 if(patientData.isActive == 0 & patientData.status == 2){
-                    CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK, "This email does not exists with current company, Please connect with Akos Support", 203);
+                    return CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK, "This email does not exists with current company, Please connect with Akos Support", 203);
                 }
 
                 if(patientData.isActive == 0 & patientData.status == 1){
-                    CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK, "You have removed from the company, Please connect with Akos Support", 203);
+                    return CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK, "You have removed from the company, Please connect with Akos Support", 203);
                 }
     
                 if(patientData.isActive == 1 & patientData.status == 1){
@@ -191,11 +193,11 @@ class PatientController {
                     if(patientDetails){
                         //When it is dependent
                         if(patientDetails.isActive == 0 & patientDetails.status == 2){
-                            CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK, "This email does not exists with current company, Please connect with Akos Support", 203);
+                            return CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK, "This email does not exists with current company, Please connect with Akos Support", 203);
                         }
                         // when it is dependent
                         if(patientDetails.isActive == 0 & patientDetails.status == 1){
-                            CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK, "You have removed from the company, Please connect with Akos Support", 203);
+                            return CommonHelper.sendError(res, STATUS_CODE.HTTP_200_OK, "You have removed from the company, Please connect with Akos Support", 203);
                         }
 
                         if(patientDetails.isActive == 1 & patientDetails.status == 1){
@@ -206,9 +208,9 @@ class PatientController {
             }
             const careNavigator = await CareNavigator.findOne({ where : { email : patientEmail } });
             if(careNavigator){
-                CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "You are not authorized to logged In.");
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "You are not authorized to logged In.");
             }else{
-                CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No user found with the provided email.");
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No user found with the provided email.");
             }
         } catch (error) {
             CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
@@ -223,11 +225,18 @@ class PatientController {
             if (!patientPrescriptionDetails) {
                 throw new Error("Invalid input");
             }
-            if (patientPrescriptionDetails.doctorEmail == null || patientPrescriptionDetails.doctorEmail == "") {
-                throw new Error("Invalid input");
+            // the prescribing doctor is always the logged in doctor, never the email sent in the body
+            const doctor = await Doctor.findOne({ where: { id: req.user.id } });
+            if (!doctor) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, 'Access denied');
             }
+            patientPrescriptionDetails.doctorEmail = doctor.email;
+            delete patientPrescriptionDetails.id;
 
-            const prescription = await PatientService.savePrescriptionDetail(patientPrescriptionDetails, medicineDetails);
+            const prescription = await PatientService.savePrescriptionDetail(patientPrescriptionDetails, medicineDetails, doctor.id);
+            if (prescription === false) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, 'Access denied');
+            }
             if(prescription){
                 const data = await PatientService.getPrescriptionData(prescription.id);
                 await generatePrescription(data);
@@ -257,8 +266,8 @@ class PatientController {
     }
 
     static async getPrescriptionDetail(req, res) {
-        let { email, token, cid } = req.query;
-        const secretKey = PRESCRIPTION_LINK_SECRET;
+      try {
+        let { token, cid } = req.query;
         let patientId;
         let patientDetails;
         let patientDetail;
@@ -269,9 +278,6 @@ class PatientController {
             "email" : "support@akosmd.in",
             "phone" : "8595461929"
         }, doctorDetail: {}, prescriptionDetail: {} };
-        if(!email){
-            throw new Error("Something went wrong!");
-        }
         // Decode token if provided
         if (token) {
             // token = decodeURIComponent(token);
@@ -291,14 +297,14 @@ class PatientController {
             patientDetails = await AppointmentService.talkToDoctorDetails(patientId);
             patientDetail = await AppointmentService.getPatientDetails(patientId);
         }
-        // Fetch doctor details if email is provided
-        if (email) {
+        // doctor details always come from the logged in doctor, the email query param is ignored
+        {
             // email = decodeURIComponent(email);
             // for (let i = 0; i < email.length; i++) {
                 // decryptedEmail += String.fromCharCode(email.charCodeAt(i) ^ secretKey.charCodeAt(i % secretKey.length));
             // }
             // if(decryptedEmail){
-                const doctor = await Doctor.findOne({ where: { email: email } });
+                const doctor = await Doctor.findOne({ where: { id: req.user.id } });
                 if(!doctor){
                     throw new Error("Something went wrong!");
                 }
@@ -349,16 +355,23 @@ class PatientController {
         }
         
         return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { response });
+      } catch (error) {
+        return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+      }
     }
 
     static async updateProfile(req, res) {
         try {
-        
-            if (!req.body.patientId) {
-                throw new Error("Invalid input");
+            // a patient can only update itself, a care navigator only patients of its companies
+            let patientId = req.user.id;
+            if (req.user.role === 'careNavigator') {
+                patientId = parseInt(req.body.patientId, 10);
+                if (!patientId || !(await PatientService.isPatientInCompanies(patientId, req.careCompanyIds))) {
+                    return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, 'Access denied');
+                }
             }
 
-            const patientDetail = await PatientService.updateProfile(req.body);
+            const patientDetail = await PatientService.updateProfile({ ...req.body, patientId });
             if(patientDetail){
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Success", { patientDetail });
             }
@@ -375,11 +388,8 @@ class PatientController {
                 throw new Error("Invalid input");
             }
 
-            if (!req.body.patientId) {
-                throw new Error("Invalid input");
-            }
-
-            const patientDetail = await PatientService.updateNotes(req.body);
+            // notes are saved on the logged in patient, the patientId in the body is ignored
+            const patientDetail = await PatientService.updateNotes({ notes: req.body.notes, patientId: req.user.id });
             if(patientDetail){
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Success", { patientDetail });
             }
@@ -397,17 +407,16 @@ class PatientController {
           if(patient) {
             userDetails = await PatientService.getPatientDetailsByEmail(patient.email, patient);
             if (userDetails.length === 0) {
-                CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided token.");
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided token.");
             }
             userDetails.currentRole = "patient";
             const loggedBy = "careNavigator";
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { userDetails, loggedBy });          
           }else{
-            throw new Error("No Patient found");
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "No Patient found");
           }
         } catch (error) {
-          console.error(error);
-          return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
+          return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
     

@@ -6,8 +6,9 @@ const LabOrder = require('../models/labOrder');
 const LabOrderDetails = require('../models/labOrderDetails');
 const Cart = require('../models/cart');
 const CartDetails = require('../models/cartDetail');
-const fs = require('fs').promises;    
+const fs = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
 const { logError } = require('../helpers/logErrorHelper');
 const { PATIENT_BACKEND_URL, DEV_PAYUMONEY_LINK, DEV_PAYU_MONEY_SALT, DEV_PAYU_MONEY_KEY, DEV_PAYU_SUCCESS_URL, DEV_PAYU_FAILED_URL, DEV_PAYU_CANCEL_URL,REDCLIFF_BASE_URL,REDCLIFF_COOKIE,REDCLIFF_KEY } = require('../config/secret');
 const axios = require('axios');
@@ -48,7 +49,181 @@ const PAYU_MONEY_KEY = DEV_PAYU_MONEY_KEY; // Replace with your actual key
 const PAYU_MONEY_SALT = DEV_PAYU_MONEY_SALT; // Replace with your actual salt
 const REDCLIFF_LAB_URL = REDCLIFF_BASE_URL;
 
+// the apps send 1/2, the tables store the enum names
+const ITEM_TYPES = { 1: 'Test', 2: 'Package', Test: 'Test', Package: 'Package' };
+const ITEM_MODES = { 1: 'Pathology', 2: 'Radiology', Pathology: 'Pathology', Radiology: 'Radiology' };
+// order columns a patient may set when placing an order (payment / status columns are server side only)
+const LAB_ORDER_FIELDS = ['bookingDate', 'bookingTime', 'bookingAddress', 'labId', 'labCityName', 'labBranchId', 'subCityId', 'price', 'discountApplied', 'otherCharges', 'totalPrice', 'slotId', 'availableSlotId', 'labType', 'code'];
+const LAB_ORDER_DETAIL_FIELDS = ['name', 'modeOfTest', 'noOfTest', 'labId', 'labType', 'code'];
+const UPLOAD_EXTENSIONS = ['jpg', 'jpeg', 'png', 'pdf'];
+const COUPON_MAX_ATTEMPTS = 10;
+const COUPON_WINDOW_MS = 15 * 60 * 1000;
+const couponAttempts = new Map();
+
+// care navigator company ids as an int list for "IN (:careCompanyIds)", -1 matches nothing when empty
+const toCompanyIdList = (ids) => {
+    const list = (Array.isArray(ids) ? ids : String(ids ?? "").split(","))
+        .map(id => parseInt(id, 10))
+        .filter(id => Number.isInteger(id) && id > 0);
+    return list.length ? list : [-1];
+};
+
+// error with an http status the controller can return as is
+const httpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
+
+const safeEqual = (a, b) => {
+    const left = Buffer.from(String(a ?? ''));
+    const right = Buffer.from(String(b ?? ''));
+    return left.length === right.length && left.length > 0 && crypto.timingSafeEqual(left, right);
+};
+
 class labTestService {
+    // companies the patient belongs to: own company plus the connected companies (a dependent uses the parent's)
+    static async getPatientCompanyIds(patientId) {
+        const patient = await Patient.findOne({ where: { id: patientId }, attributes: ['id', 'parent_id', 'companyId', 'employer_id'] });
+        if (!patient) return [];
+        const ownerIds = [patient.id];
+        if (Number(patient.parent_id) > 0) ownerIds.push(patient.parent_id);
+        const rows = await sequelizeDB1.query(
+            'SELECT companyId FROM connectedCompaniesPatient WHERE patientId IN (:ownerIds) AND isActive = 1',
+            { replacements: { ownerIds }, type: QueryTypes.SELECT }
+        );
+        return [patient.companyId, patient.employer_id, ...rows.map(row => row.companyId)]
+            .map(id => parseInt(id, 10))
+            .filter((id, index, list) => Number.isInteger(id) && id > 0 && list.indexOf(id) === index);
+    }
+
+    static async isPatientCompany(patientId, companyId) {
+        const companyIds = await this.getPatientCompanyIds(patientId);
+        return companyIds.includes(parseInt(companyId, 10));
+    }
+
+    // true when the patient belongs to one of the care navigator's companies
+    static async isPatientInCareScope(patientId, careCompanyIds) {
+        if (!Array.isArray(careCompanyIds) || careCompanyIds.length === 0) return false;
+        const [row] = await sequelizeDB1.query(
+            'SELECT id FROM patient WHERE id = :patientId AND (companyId IN (:careCompanyIds) OR employer_id IN (:careCompanyIds)) LIMIT 1',
+            { replacements: { patientId, careCompanyIds }, type: QueryTypes.SELECT }
+        );
+        return !!row;
+    }
+
+    static async getOwnedCart(cartId, patientId) {
+        if (!cartId) return null;
+        return Cart.findOne({ where: { id: cartId, patientId } });
+    }
+
+    // razorpay checkout signature: hmac_sha256(order_id|payment_id, key_secret)
+    static verifyRazorpaySignature(razorpayOrderId, razorpayPaymentId, signature) {
+        const secret = process.env.RAZORPAY_SECRET;
+        if (!secret || !razorpayOrderId || !razorpayPaymentId || !signature) return false;
+        const expected = crypto.createHmac('sha256', secret).update(`${razorpayOrderId}|${razorpayPaymentId}`).digest('hex');
+        return safeEqual(expected, signature);
+    }
+
+    // payment response must be signed by razorpay for the razorpay order created for this lab order
+    static async verifyLabOrderPayment(orderId, response) {
+        const payment = response && typeof response === 'object' ? response : {};
+        const [row] = await sequelizeDB1.query(
+            'SELECT razorpay_order_id FROM labOrders WHERE id = :orderId LIMIT 1',
+            { replacements: { orderId }, type: QueryTypes.SELECT }
+        );
+        if (!row || !row.razorpay_order_id || !safeEqual(row.razorpay_order_id, payment.razorpay_order_id)) return false;
+        return this.verifyRazorpaySignature(payment.razorpay_order_id, payment.razorpay_payment_id, payment.razorpay_signature);
+    }
+
+    // amount the patient has to pay for an order, same rule as the cart summary page (paid items: price - discount)
+    static async getPayableTotal(orderId) {
+        const [order] = await this.getLabOrdersByPatientId(orderId);
+        if (!order) return null;
+        let total = 0;
+        for (const item of order.orderDetails) {
+            if (item.isFree !== 1) {
+                total += (parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0);
+            }
+        }
+        return Math.max(0, Math.round(total * 100) / 100);
+    }
+
+    // whitelist the order fields and check every item against the patient's cart and the lab price list
+    static async prepareLabOrder(body, patientId) {
+        const details = body.orderDetails;
+        if (!Array.isArray(details) || details.length === 0 || details.length > 100) {
+            throw httpError(400, 'Order items are required');
+        }
+        const cart = await this.getOwnedCart(body.cartId, patientId);
+        if (!cart) {
+            throw httpError(404, 'Cart not found');
+        }
+        const cartItems = await CartDetails.findAll({ where: { cartId: cart.id, patientId, isDeleted: false } });
+        const companyIds = await this.getPatientCompanyIds(patientId);
+
+        const orderData = { patientId };
+        for (const field of LAB_ORDER_FIELDS) {
+            if (body[field] !== undefined) orderData[field] = body[field];
+        }
+
+        const orderDetails = [];
+        for (const detail of details) {
+            const type = ITEM_TYPES[detail?.type];
+            const mode = ITEM_MODES[detail?.mode];
+            if (!type || !mode) {
+                throw httpError(400, 'Invalid order item');
+            }
+            const cartItem = cartItems.find(item => Number(item.referenceId) === Number(detail.referenceId) && item.type === type && item.mode === mode);
+            if (!cartItem) {
+                throw httpError(400, 'Order items must be in your cart');
+            }
+            let patientCompanyId = null;
+            if (detail.patientCompanyId !== undefined && detail.patientCompanyId !== null && detail.patientCompanyId !== '') {
+                patientCompanyId = parseInt(detail.patientCompanyId, 10);
+                if (!companyIds.includes(patientCompanyId)) {
+                    throw httpError(403, 'Invalid company');
+                }
+            }
+            const price = detail.price === null || detail.price === undefined || detail.price === '' ? 0 : Number(detail.price);
+            const discount = detail.discount === null || detail.discount === undefined || detail.discount === '' ? 0 : Number(detail.discount);
+            if (!Number.isFinite(price) || !Number.isFinite(discount) || price < 0 || discount < 0 || discount > price) {
+                throw httpError(400, 'Invalid item price');
+            }
+            // the price / discount pair must be one the lab price list offers for this item
+            const catalog = await sequelizeDB1.query(
+                'SELECT price, discount FROM connectedLabs WHERE referenceId = :referenceId AND type = :type AND mode = :mode AND isActive = 1',
+                { replacements: { referenceId: cartItem.referenceId, type, mode }, type: QueryTypes.SELECT }
+            );
+            const listed = catalog.some(row => Math.abs(Number(row.price || 0) - price) < 0.01 && Math.abs(Number(row.discount || 0) - discount) < 0.01);
+            if (!listed && (price > 0 || discount > 0 || await this.isPaymentRequired(patientCompanyId))) {
+                throw httpError(400, 'Item prices have changed, please refresh your cart');
+            }
+            const item = {};
+            for (const field of LAB_ORDER_DETAIL_FIELDS) {
+                if (detail[field] !== undefined) item[field] = detail[field];
+            }
+            orderDetails.push({
+                ...item,
+                type,
+                mode,
+                referenceId: cartItem.referenceId,
+                // company of the cart item decides whether a company package is free, never the app
+                companyIdPackageTest: cartItem.companyId,
+                patientCompanyId,
+                price,
+                discount,
+                total: Math.round((price - discount) * 100) / 100,
+            });
+        }
+        return { ...orderData, orderDetails };
+    }
+
+    static async isPaymentRequired(companyId) {
+        if (!companyId) return true;
+        const [company] = await sequelizeDB1.query(
+            'SELECT is_pament_required FROM worksman_company_list WHERE id = :companyId LIMIT 1',
+            { replacements: { companyId }, type: QueryTypes.SELECT }
+        );
+        return !company || Number(company.is_pament_required) === 1;
+    }
+
     static async getPackagesAndTests(companyId, search) {
         const packageQuery = `
             SELECT 
@@ -225,12 +400,14 @@ ORDER BY
             // Extract the image extension from MIME type
             // const extension = mimeType.split('/')[1];
             if (!extension) throw new Error("Unable to determine file extension");
+            const safeExtension = String(extension).toLowerCase();
+            if (!UPLOAD_EXTENSIONS.includes(safeExtension)) throw new Error("File type not allowed");
+            const safeType = String(type).replace(/[^a-z0-9]/gi, '') || 'file';
 
-            // Generate file paths
+            // Generate file paths, random names so files under /assets cannot be guessed
             const year = new Date().getFullYear();
             const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
-            const timestamp = Date.now();
-            const fileName = `${type}_${timestamp}.${extension}`;
+            const fileName = `${safeType}_${crypto.randomBytes(16).toString('hex')}.${safeExtension}`;
             const dir = path.join(__dirname, '..', 'assets', year.toString(), month);
             const filePath = path.join(dir, fileName);
             const filePathFinal = `${PATIENT_BACKEND_URL}/assets/${year}/${month}/${fileName}`;
@@ -269,7 +446,7 @@ ORDER BY
                     code
                 });
             }else{
-                throw new Error("This item already added into cart");
+                throw httpError(400, "This item already added into cart");
             }
         }else{ //Cart not exists
             console.log("cart mode",mode);
@@ -292,7 +469,7 @@ ORDER BY
                             code
                         });
                     }else{
-                        throw new Error("This item already added into cart");
+                        throw httpError(400, "This item already added into cart");
                     }
                 }
             }else{
@@ -314,7 +491,7 @@ ORDER BY
                             code
                         });
                     }else{
-                        throw new Error("This item already added into cart");
+                        throw httpError(400, "This item already added into cart");
                     }
                 }
             }
@@ -774,17 +951,21 @@ ORDER BY
         }
     }
 
-    static async removeCartItem(cartId) {
-        // check cartId 
+    static async removeCartItem(cartId, patientId) {
+        // check cartId, only an item of the patient's own cart
         const queryCart = `
-            SELECT * FROM cartDetails
-            WHERE id = :cartId;
+            SELECT cd.* FROM cartDetails cd
+            INNER JOIN cart c ON c.id = cd.cartId AND c.patientId = :patientId
+            WHERE cd.id = :cartId;
         `;
 
         const cartResult = await sequelizeDB1.query(queryCart, {
-            replacements: { cartId },
+            replacements: { cartId, patientId },
             type: QueryTypes.SELECT
         });
+        if (cartResult.length === 0) {
+            throw httpError(404, 'Cart item not found');
+        }
         const crId = cartResult[0].cartId;
         const query = `
             DELETE FROM cartDetails
@@ -986,8 +1167,9 @@ ORDER BY
             "city" : city
         }
         if(id){
+            // only the patient's own address row
             await LabTestBookingAddress.update(updateData, {
-                where: { id: patientId }
+                where: { id, patientId }
             });
         }else{
             await LabTestBookingAddress.create(updateData);
@@ -1004,6 +1186,7 @@ ORDER BY
         return labTestDetail;
     }
     
+    // callers check the cart belongs to the patient (getOwnedCart) first
     static async getLabDetail(cartId) {
         const query = `
             SELECT
@@ -2149,30 +2332,36 @@ WHERE
         return result;
     }
 
-    static async updateCart(cartId, updateData) {
+    static async updateCart(cartId, updateData, patientId) {
+        // only the patient's own cart
         const result = await Cart.update(updateData, {
-            where: { id: cartId }
+            where: { id: cartId, patientId }
         });
         return result;
     }
-    
-    static async removeCart(cartId) {
+
+    static async removeCart(cartId, patientId) {
+        // only the patient's own cart
+        const cart = await this.getOwnedCart(cartId, patientId);
+        if (!cart) {
+            return false;
+        }
         const cartQuery = `
             DELETE FROM cartDetails
             WHERE cartId = :cartId;
         `;
         const query = `
             DELETE FROM cart
-            WHERE id = :cartId;
+            WHERE id = :cartId AND patientId = :patientId;
         `;
 
         await sequelizeDB1.query(cartQuery, {
-            replacements: { cartId },
+            replacements: { cartId: cart.id },
             type: QueryTypes.DELETE
         });
 
         await sequelizeDB1.query(query, {
-            replacements: { cartId },
+            replacements: { cartId: cart.id, patientId },
             type: QueryTypes.DELETE
         });
 
@@ -2287,7 +2476,7 @@ WHERE
                     AND lo.isDeleted = false
                     AND lod.isActive = true
                     AND lod.isDeleted = false
-                    AND (p.companyId IN (${careCompanyIds}) OR p.employer_id IN (${careCompanyIds}))
+                    AND (p.companyId IN (:careCompanyIds) OR p.employer_id IN (:careCompanyIds))
             `;
            
             // Add filtering based on the selected time range
@@ -2333,6 +2522,7 @@ WHERE
 
             const replacements = {
                 status,
+                careCompanyIds: toCompanyIdList(careCompanyIds),
             };
     
             if (search) {
@@ -2373,13 +2563,14 @@ WHERE
                     lo.orderStatus = "pending"
                     AND lo.isActive = true
                     AND lo.isDeleted = false
-                    AND p.employer_id IN (${careCompanyIds})
+                    AND p.employer_id IN (:careCompanyIds)
                 ORDER BY 
                     lo.bookingDate DESC
                 LIMIT 5
             `;
           
             const results = await sequelizeDB1.query(query, {
+                replacements: { careCompanyIds: toCompanyIdList(careCompanyIds) },
                 type: QueryTypes.SELECT
             });
     
@@ -2508,7 +2699,7 @@ WHERE
                 key_secret: process.env.RAZORPAY_SECRET, // Your Razorpay secret
             });
 
-            const amountInPaise = totalPrice*100;
+            const amountInPaise = Math.round(Number(totalPrice) * 100);
 
             const orderOptions = {
                 amount: amountInPaise, // Amount in paise
@@ -2538,7 +2729,7 @@ WHERE
                 // await LabOrder.update(updateData, {
                 //     where: { id: order.notes.orderId },
                 // });
-                this.updateOrderRazopay(order.id,order.notes.orderId);
+                await this.updateOrderRazopay(order.id,order.notes.orderId);
                // console.log(updateData,order.notes.orderId,"jdjdj");
                 // Return the Razorpay order details
                 const returnData = {
@@ -2594,7 +2785,7 @@ WHERE
                 key_secret: process.env.RAZORPAY_SECRET, // Your Razorpay secret
             });
 
-            const amountInPaise = totalPrice*100;
+            const amountInPaise = Math.round(Number(totalPrice) * 100);
 
             const orderOptions = {
                 amount: amountInPaise, // Amount in paise
@@ -2617,7 +2808,7 @@ WHERE
          
             if (order && order.id && patientDetails) {
                 // order id save                
-                this.updateOrderRazopay(order.id,order.notes.orderId);
+                await this.updateOrderRazopay(order.id,order.notes.orderId);
                 // Return the Razorpay order details
                 const returnData = {
                     key: process.env.RAZORPAY_KEY_ID, // Razorpay key_id received from the server
@@ -2681,12 +2872,13 @@ WHERE
             WHERE 
                 ltp.isActive = true 
                 AND ltp.isDeleted = false
-                AND p.employer_id IN (${careCompanyIds})
+                AND p.employer_id IN (:careCompanyIds)
             ORDER BY 
                 ltp.createdAt DESC;
         `;
     
         const prescriptions = await sequelizeDB1.query(query, {
+            replacements: { careCompanyIds: toCompanyIdList(careCompanyIds) },
             type: QueryTypes.SELECT,
         });
     
@@ -2729,7 +2921,7 @@ WHERE
        // console.log(REDCLIFF_LAB_URL);
        // const alocData = await axios.get(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-location-2-eloc?place_query=mewat hariyana", payload);
         //console.log(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-location-2-eloc?place_query="+city+" "+state);
-        const alocData = await axios.get(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-location-2-eloc?place_query="+areaString, payload);
+        const alocData = await axios.get(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-location-2-eloc?place_query="+encodeURIComponent(String(areaString ?? "")), payload);
         return alocData.data;
     }
 
@@ -2743,8 +2935,7 @@ WHERE
           };
        // console.log(REDCLIFF_LAB_URL);
        // const alocData = await axios.get(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-location-2-eloc?place_query=mewat hariyana", payload);
-        console.log(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-loc-2-eloc/?eloc="+aloc);
-        const latLongData = await axios.get(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-loc-2-eloc/?eloc="+aloc, payload);        
+        const latLongData = await axios.get(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-loc-2-eloc/?eloc="+encodeURIComponent(String(aloc ?? "")), payload);        
         return latLongData;
     }
 
@@ -2759,11 +2950,12 @@ WHERE
           };
        // console.log(REDCLIFF_LAB_URL);
        // const alocData = await axios.get(REDCLIFF_LAB_URL+"api/partner/v2/get-partner-location-2-eloc?place_query=mewat hariyana", payload);
-        console.log(REDCLIFF_LAB_URL+"api/booking/v2/get-time-slot-list/?collection_date="+collection_date+"&latitude="+lat+"&longitude="+long);
-        const collectionSlot = await axios.get(REDCLIFF_LAB_URL+"api/booking/v2/get-time-slot-list/?collection_date="+collection_date+"&latitude="+lat+"&longitude="+long, payload); 
+        const query = new URLSearchParams({ collection_date: String(collection_date ?? ""), latitude: String(lat ?? ""), longitude: String(long ?? "") });
+        const collectionSlot = await axios.get(REDCLIFF_LAB_URL+"api/booking/v2/get-time-slot-list/?"+query.toString(), payload); 
         return collectionSlot;
     }
     // create booking in redcliff
+    // pId: logged in patient, the order has to be theirs
     static async createBookingRedcliff(orderId,pId){
 
         //  const data = {           
@@ -2814,17 +3006,22 @@ WHERE
                     labs l ON lo.labId = l.id
                 WHERE 
                     lo.id = :orderId AND 
+                    lo.patientId = :pId AND
                     lo.labType = 'Redcliff' AND
                     lo.paymentStatus = 'paid'
                     ;
             `;          
             const results = await sequelizeDB1.query(query, {
-                replacements: { orderId },
+                replacements: { orderId, pId },
                 type: QueryTypes.SELECT
             });          
            // console.log(rs.bookingDate);           
             if(results.length> 0){
                 const rs = results[0];
+                // already booked with redcliff, never book the same order twice
+                if (rs.booking_id) {
+                    return true;
+                }
                 const patientId =  rs.patientId;   
                 // get customer details                
                 const queryPatient = `
@@ -3101,7 +3298,7 @@ WHERE
                 key_secret: process.env.RAZORPAY_SECRET, // Your Razorpay secret
             });
 
-            const amountInPaise = totalPrice*100;
+            const amountInPaise = Math.round(Number(totalPrice) * 100);
 
             const randomSixDigit = Math.floor(10000000 + Math.random() * 900000);
 
@@ -3132,7 +3329,7 @@ WHERE
                 // await LabOrder.update(updateData, {
                 //     where: { id: order.notes.orderId },
                 // });
-                this.updatePaymentCallRazopay(order.id,order.notes.orderId);
+                await this.updatePaymentCallRazopay(order.id,order.notes.orderId);
                // console.log(updateData,order.notes.orderId,"jdjdj");
                 // Return the Razorpay order details
                 const returnData = {
@@ -3182,8 +3379,12 @@ WHERE
     }
     // check patient for call 
     static async postPayemntPatientForCall(patient_id,company_id,call_type,total_price,call_date,call_time){
-        if (total_price <= 0) {
-            throw new Error('Total price must be greater than zero!');
+        total_price = Number(total_price);
+        if (!Number.isFinite(total_price) || total_price <= 0) {
+            throw httpError(400, 'Total price must be greater than zero!');
+        }
+        if (![1, 2].includes(Number(call_type))) {
+            throw httpError(400, 'Invalid call type');
         }
         const insertQuery = `INSERT INTO 
                                 payment_for_call
@@ -3228,6 +3429,15 @@ WHERE
         return true;
     }
     // payment status update
+    // the call payment row of the patient, null when it is not theirs
+    static async getOwnedCallPayment(orderId, patientId) {
+        const [row] = await sequelizeDB1.query(
+            'SELECT id, patient_id, razorpay_order_id, payment_status FROM payment_for_call WHERE id = :orderId AND patient_id = :patientId LIMIT 1',
+            { replacements: { orderId, patientId }, type: QueryTypes.SELECT }
+        );
+        return row || null;
+    }
+
     static async updateCallForPaymentStatus(orderId, updateData, response){
         //  const result = await LabOrder.update(updateData, {
         //     where: { id: orderId }
@@ -3329,46 +3539,44 @@ WHERE
     }
     // coupon verified
     static async checkCouponCode(patient_id, coupon_code){
-        console.log("ser",patient_id)
-         if (coupon_code  == '' && patient_id == '') {
-            throw new Error('Please provide valid data!');
+         if (!coupon_code || typeof coupon_code !== 'string' || coupon_code.length > 64 || !patient_id) {
+            throw httpError(400, 'Please provide valid data!');
         }
-        const insertQuery = `SELECT * from
-                                patient_coupon
-                            where
-                                patient_id = :patient_id
-                            AND
-                                coupon_code = :coupon_code
-                            AND
-                                status = 1    
-                            `;
-
-            const insertReplacements = {
-                patient_id,
-                coupon_code               
-            };
-           const [result] = await sequelizeDB1.query(insertQuery, {
-                type: QueryTypes.SELECT,
-                replacements: insertReplacements
-            }); 
-            // update status
+        // limit guesses per patient
+        const now = Date.now();
+        const attempt = couponAttempts.get(patient_id);
+        if (attempt && attempt.resetAt > now) {
+            if (attempt.count >= COUPON_MAX_ATTEMPTS) {
+                throw httpError(429, 'Too many coupon attempts, please try again later');
+            }
+            attempt.count += 1;
+        } else {
+            couponAttempts.set(patient_id, { count: 1, resetAt: now + COUPON_WINDOW_MS });
+        }
+        // claim the coupon in one statement so a coupon can be used only once, even with parallel requests
              const orderLabQuesry = `
            update patient_coupon set status = 2
              where
                 patient_id = :patient_id
             AND
                 coupon_code = :coupon_code
-        `; 
+            AND
+                status = 1
+        `;
 
          const updateReplacements = {
                 patient_id,
-                coupon_code               
+                coupon_code
             };
 
-        await sequelizeDB1.query(orderLabQuesry, {
+        const [, affectedRows] = await sequelizeDB1.query(orderLabQuesry, {
             replacements: updateReplacements,
             type: QueryTypes.UPDATE
         });
+        const result = Number(affectedRows) > 0;
+        if (result) {
+            couponAttempts.delete(patient_id);
+        }
 
 
             const data = {};

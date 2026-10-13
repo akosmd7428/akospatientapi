@@ -390,10 +390,12 @@ class PatientService {
             }
 
             // Upsert patient family history
+            // family_history comes from the request, spread it first so it can't override the row owner or id
+            const { id: _ignoredId, patientId: _ignoredPatientId, ...familyHistoryFields } = family_history || {};
             const familyHistoryData = {
+                ...familyHistoryFields,
                 patientId,
                 isChild: isChild == true ? 1 : 0,
-                ...family_history,
             };
 
             let patientFamilyHistory = await PatientFamilyHistory.findOne({ where: { patientId } });
@@ -566,6 +568,35 @@ class PatientService {
         return result;
     }
     
+    // true when the patient (or the parent of a dependent) belongs to one of the given companies
+    static async isPatientInCompanies(patientId, companyIds) {
+        const [row] = await sequelizeDB1.query(
+            `SELECT 1 AS found
+             FROM patient p
+             LEFT JOIN patient parent ON parent.id = p.parent_id
+             WHERE p.id = :patientId
+                AND (p.employer_id IN (:companyIds) OR parent.employer_id IN (:companyIds))
+             LIMIT 1`,
+            { replacements: { patientId, companyIds }, type: QueryTypes.SELECT }
+        );
+        return !!row;
+    }
+
+    // true when the company is one the patient (or the parent of a dependent) is connected to
+    static async isPatientConnectedToCompany(patientId, companyId) {
+        const [row] = await sequelizeDB1.query(
+            `SELECT 1 AS found
+             FROM patient p
+             JOIN connectedCompaniesPatient ccp ON ccp.patientId IN (p.id, p.parent_id)
+             WHERE p.id = :patientId
+                AND ccp.companyId = :companyId
+                AND ccp.isActive = true
+             LIMIT 1`,
+            { replacements: { patientId, companyId }, type: QueryTypes.SELECT }
+        );
+        return !!row;
+    }
+
     static async getProfileByPatientEmail(patientEmail) {
         try {
             return await ConnectedCompaniesPatient.findOne({ where: { patientEmail } });
@@ -574,10 +605,12 @@ class PatientService {
         }
     }
 
-    static async savePrescriptionDetail(prescriptionDetail, medicineDetail) {
+    static async savePrescriptionDetail(prescriptionDetail, medicineDetail, doctorId) {
         try {
             let prescription = '';
             let generalPrescriptionDetail = {};
+            // never trust a client supplied unique number, it is generated below
+            delete prescriptionDetail.prescriptionUniqueId;
             if(prescriptionDetail.callId && prescriptionDetail.appointmentId){
                 const query = `
                 SELECT
@@ -587,12 +620,21 @@ class PatientService {
                 WHERE
                     ccl.call_id = :callId
                 `;
-    
+
                 const [result] = await sequelizeDB1.query(query, {
                     replacements: { callId: prescriptionDetail.callId },
                     type: QueryTypes.SELECT
                 });
                 prescriptionDetail.appointmentId = result.appointmentId;
+            }
+            // a doctor can only write the prescription of its own appointment for that appointment's patient
+            if (doctorId && prescriptionDetail.appointmentId) {
+                const appointment = await Appointment.findOne({ where: { id: prescriptionDetail.appointmentId } });
+                if (appointment && (appointment.doctorId != doctorId || appointment.patientId != prescriptionDetail.patientId)) {
+                    return false;
+                }
+            }
+            if(prescriptionDetail.callId && prescriptionDetail.appointmentId){
                 await Appointment.update(
                     { callId: prescriptionDetail.callId },
                     {
@@ -944,7 +986,12 @@ class PatientService {
 
     static async updateProfile(data) {
         let response={};
-        await PatientDetail.update(data, { where: { patientId : data.patientId } });
+        // only the call-now health fields can be changed here, never patientId/notes/profile fields
+        const updateData = {};
+        ['medications', 'medical_allergies', 'health_problems', 'symptoms'].forEach(key => {
+            if (data[key] !== undefined) updateData[key] = data[key];
+        });
+        await PatientDetail.update(updateData, { where: { patientId : data.patientId } });
         const patientDetail = await PatientDetail.findOne({ where: { patientId: data.patientId } });
         if (patientDetail) {
             response = {
@@ -982,7 +1029,7 @@ class PatientService {
                 AND ccp.connectionType = 1
                 AND ccp.status = 1
                 AND ccp.isActive = true
-               AND p.employer_id IN (${careCompanyIds}) 
+               AND p.employer_id IN (:careCompanyIds) 
         `;
     
         // Add package filter if provided
@@ -1000,7 +1047,7 @@ class PatientService {
             )`;
         }
         query += `GROUP BY p.id,p.uniquePatientId, p.phone, cp.packageName,companyName,profilePic`;
-        const replacements = {};
+        const replacements = { careCompanyIds };
     
         if (filter) {
             replacements.filter = filter;
@@ -1042,7 +1089,7 @@ class PatientService {
                 p.isProfileCompleted = 1
                 AND ccp.status = 1
                 AND ccp.isActive = true
-                AND p.employer_id IN (${careCompanyIds})
+                AND p.employer_id IN (:careCompanyIds)
         `;
     
         // Add package filter if provided
@@ -1060,7 +1107,7 @@ class PatientService {
             )`;
         }
      query += `GROUP BY p.id,p.uniquePatientId, p.phone, cp.packageName,companyName,profilePic`;
-        const replacements = {};
+        const replacements = { careCompanyIds };
     
         if (filter) {
             replacements.filter = filter;
@@ -1091,11 +1138,12 @@ class PatientService {
             AND ccp.connectionType = 1
             AND ccp.status = 1
             AND ccp.isActive = true
-            AND p.employer_id IN (${careCompanyIds})
+            AND p.employer_id IN (:careCompanyIds)
         `;
     
         const result = await sequelizeDB1.query(query, {
             type: QueryTypes.SELECT,
+            replacements: { careCompanyIds },
         });
     
         // Since COUNT(*) returns a single row, we can return the count directly
@@ -1114,11 +1162,12 @@ class PatientService {
             p.isProfileCompleted = 1
             AND ccp.status = 1
             AND ccp.isActive = true
-            AND p.employer_id IN (${careCompanyIds})
+            AND p.employer_id IN (:careCompanyIds)
         `;
     
         const result = await sequelizeDB1.query(query, {
             type: QueryTypes.SELECT,
+            replacements: { careCompanyIds },
         });
     
         // Since COUNT(*) returns a single row, we can return the count directly
@@ -1127,7 +1176,7 @@ class PatientService {
 
     static async updateNotes(data) {
         let response={};
-        await PatientDetail.update(data, { where: { patientId : data.patientId } });
+        await PatientDetail.update({ notes: data.notes }, { where: { patientId : data.patientId } });
         const patientDetail = await PatientDetail.findOne({ where: { patientId: data.patientId } });
         if (patientDetail) {
             response = {

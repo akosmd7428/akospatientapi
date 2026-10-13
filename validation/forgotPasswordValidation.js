@@ -14,4 +14,10 @@ const changePasswordValidation = Joi.object({
   newPassword: Joi.string().min(6).required(),
 });
 
-module.exports = { sendOtpValidation, verifyOtpValidation, changePasswordValidation };
+// logged in password change, the email is still accepted from the frontends but never used
+const changeOwnPasswordValidation = Joi.object({
+  email: Joi.string().allow('', null).optional(),
+  newPassword: Joi.string().min(6).required(),
+});
+
+module.exports = { sendOtpValidation, verifyOtpValidation, changePasswordValidation, changeOwnPasswordValidation };

@@ -1,25 +1,33 @@
-const { encryptData,decryptData } = require('../config/encryption');
+const { decryptData } = require('../config/encryption');
+const CommonHelper = require('../helpers/commonHelper');
+const { STATUS_CODE } = require('../config/constant');
+
+const decryptPayload = (payload) => {
+  if (!payload || typeof payload.encryptedData !== 'string' || typeof payload.IV !== 'string') {
+    throw new Error('Missing encrypted payload');
+  }
+  const parsed = JSON.parse(decryptData(payload.encryptedData, payload.IV));
+  if (parsed === null || typeof parsed !== 'object') {
+    throw new Error('Invalid encrypted payload');
+  }
+  return parsed;
+};
 
 const validateDataEncryption = () => {
-  return (req, res, next) => {      
-      if (Object.keys(req.params).length != 0) {
-       
-        if(req.params.encryptedData != null){
-          data = decryptData(req.params.encryptedData,req.params.IV);
-          req.params = JSON.parse(data);
-        }else{
-         // console.log("shs");
-        }       
-        //console.log("hds",req.params);
-      } 
-      if (Object.keys(req.body).length != 0) {
-        data = decryptData(req.body.encryptedData,req.body.IV);
-        req.body = JSON.parse(data);       
+  return (req, res, next) => {
+    try {
+      if (Object.keys(req.params).length != 0 && req.params.encryptedData != null) {
+        req.params = decryptPayload(req.params);
+      }
+      if (req.body && Object.keys(req.body).length != 0) {
+        req.body = decryptPayload(req.body);
       }
       if (Object.keys(req.query).length != 0) {
-        data = decryptData(req.query.encryptedData,req.query.IV);
-        req.query = JSON.parse(data);      
+        req.query = decryptPayload(req.query);
       }
+    } catch (error) {
+      return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'Invalid request payload');
+    }
     next();
   };
 };

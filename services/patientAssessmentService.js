@@ -15,7 +15,7 @@ class PatientAssessmentService {
             if (data.id) {
                 // If 'id' is provided, update the existing record
                 const updatedPatientAssessment = await PatientAssessment.update(data, {
-                    where: { id: data.id },
+                    where: { id: data.id, patientId: data.patientId },
                     returning: true, // Return the updated record
                 });
                 if (updatedPatientAssessment[0] === 0) {
@@ -182,20 +182,22 @@ class PatientAssessmentService {
     static async calculateSeverity(patientId, assessmentData) {
         try {
             // Extract all assessmentOptionIds from the input data
-            const assessmentOptionIds = assessmentData.map(data => data.assessmentOptionId);
-            
-            // Convert the assessmentOptionIds array into a comma-separated string
-            const idsString = assessmentOptionIds.join(',');
+            // ints only, bound as a replacement list
+            const assessmentOptionIds = assessmentData.map(data => parseInt(data.assessmentOptionId, 10)).filter(Number.isInteger);
+            if (!assessmentOptionIds.length) {
+                throw new Error('No options selected');
+            }
 
             // Define the raw query to get the total score
             const query = `
                 SELECT optionsValue
                 FROM assessmentOptions
-                WHERE id IN (${idsString})
+                WHERE id IN (:assessmentOptionIds)
             `;
 
             // Execute the raw query
             const result = await sequelizeDB1.query(query, {
+                replacements: { assessmentOptionIds },
                 type: sequelizeDB1.QueryTypes.SELECT,
                 raw: true,
             });
@@ -248,7 +250,6 @@ class PatientAssessmentService {
                     'Content-Type': 'application/json',
                 },
             });
-            console.log(response,'response================');
             return response;
         } catch (error) {
             console.error('Error:', error.message);
