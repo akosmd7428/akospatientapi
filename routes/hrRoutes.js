@@ -22,6 +22,7 @@ router.get('/employeeEngagement',validateDataEncryption(), jwtAuthHr, HrControll
 router.post('/sendReminder',validateDataEncryption(), jwtAuthHr, HrController.sendReminder);
 router.post('/send-email',validateDataEncryption(),jwtAuthHr, HrController.sendEmailhr);
 router.get('/user-module',validateDataEncryption(), jwtAuthHr, HrController.getUserModule);
+router.get('/labTests',validateDataEncryption(), jwtAuthHr, HrController.getLabTests);
 
 // router.get('/appointments',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.getAppointments);
 // router.post('/reschedule',validateDataEncryption(), jwtAuthCareNavigator, CareNavigatorController.rescheduleAppointment);
