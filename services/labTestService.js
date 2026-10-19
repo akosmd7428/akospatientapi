@@ -23,6 +23,15 @@ const CareNavigator = require('../models/careNavigatorModel');
 
 const LAB_ORDER_APPROVED_MESSAGE = 'This lab test is already approved by the care navigator. Please contact your care navigator to reschedule it.';
 const LAB_RESCHEDULE_WINDOW_MESSAGE = 'Reschedule is allowed only up to 2 days before the booked date and time. Please contact your care navigator.';
+// hr lab test tabs: the status the frontend sends for a tab and the order statuses that tab lists
+const HR_LAB_STATUS_TABS = [
+    { key: 'requested', label: 'Requested', status: 'pending', orderStatuses: ['pending', 'Payment Completed'], color: '#8AB8EA' },
+    { key: 'scheduled', label: 'Scheduled', status: 'confirmed', orderStatuses: ['confirmed', 'Reschedule'], color: '#3A8DDE' },
+    { key: 'collected', label: 'Collected', status: 'Completed', orderStatuses: ['Completed'], color: '#1F5FA3' },
+    { key: 'reportReceived', label: 'Report received', status: 'Report Generated', orderStatuses: ['Report Generated'], color: '#22B07D' },
+    { key: 'cancelled', label: 'Cancelled', status: 'cancelled', orderStatuses: ['cancelled'], color: '#E54B4B' },
+];
+const HR_LAB_FILTER_LABELS = { '1': 'Last 30 days', '2': 'Last 6 months', '3': 'Last 1 year', all: 'All time' };
 
 // start of a booked slot: bookingDate "YYYY-MM-DD" (or "DD-MM-YYYY") + bookingTime "8:00 AM to 9:00 AM"
 function bookingStartTime(bookingDate, bookingTime) {
@@ -2537,6 +2546,153 @@ WHERE
             return results;
         } catch (error) {
             throw new Error(`Error fetching lab orders: ${error.message}`);
+        }
+    };
+
+    // conditions shared by the hr lab test list and the hr status graph, so both always count the same orders:
+    // a single company, paid and active orders, the time range filter and the search box
+    static buildHrLabOrderConditions(search, filter, companyId) {
+        let where = ` lo.isPaid = 1
+                    AND lo.isActive = true
+                    AND lo.isDeleted = false
+                    AND lod.isActive = true
+                    AND lod.isDeleted = false
+                    AND (p.companyId = :companyId OR p.employer_id = :companyId)
+            `;
+        switch (filter) {
+            case '1': // Last month
+                where += ` AND lo.bookingDate >= DATE_SUB(NOW(), INTERVAL 1 MONTH) `;
+                break;
+            case '2': // Last 6 months
+                where += ` AND lo.bookingDate >= DATE_SUB(NOW(), INTERVAL 6 MONTH) `;
+                break;
+            case '3': // Last 1 year
+                where += ` AND lo.bookingDate >= DATE_SUB(NOW(), INTERVAL 1 YEAR) `;
+                break;
+            default:
+                break;
+        }
+        const replacements = { companyId };
+        if (search) {
+            where += ` AND (
+                    l.labName LIKE :search OR
+                    lo.labCityName LIKE :search OR
+                    CONCAT(p.first_name, ' ', p.last_name) LIKE :search
+                )`;
+            replacements.search = `%${search}%`;
+        }
+        return { where, replacements };
+    }
+
+    // hr portal lab tests, always limited to a single company (resolved by the controller from the hr row)
+    static async getLabOrdersForHr(status, search, filter, companyId) {
+        try {
+            const tab = HR_LAB_STATUS_TABS.find(item => item.status === status);
+            const statusSql = tab
+                ? `lo.orderStatus IN (:orderStatuses)`
+                : `lo.orderStatus = :status`;
+            const { where, replacements } = this.buildHrLabOrderConditions(search, filter, companyId);
+            const query = `
+                SELECT
+                    lo.id AS labOrderId,
+                    p.id AS patientId,
+                    lo.uniqueBookingId,
+                    lo.labId,
+                    CONCAT(p.first_name, ' ', p.last_name) AS patientName,
+                    l.labName,
+                    l.description AS labDescription,
+                    GROUP_CONCAT(DISTINCT lod.type) AS types,
+                    GROUP_CONCAT(DISTINCT lod.mode) AS modes,
+                    lo.labCityName,
+                    lo.bookingDate,
+                    lo.bookingTime,
+                    lo.orderStatus,
+                    lo.labReportURL,
+                    COALESCE(MAX(c.is_sub_city), 0) AS is_sub_city
+                FROM
+                    labOrders lo
+                JOIN
+                    labOrderDetails lod ON lo.id = lod.labOrderId
+                LEFT JOIN
+                    labs l ON lo.labId = l.id
+                JOIN
+                    patient p ON lo.patientId = p.id
+                LEFT JOIN
+                    worksman_company_list c ON c.id = p.companyId
+                WHERE ${statusSql} AND ${where}
+                GROUP BY
+                    lo.id,
+                    p.id,
+                    lo.uniqueBookingId,
+                    lo.labId,
+                    p.first_name,
+                    p.last_name,
+                    l.labName,
+                    l.description,
+                    lo.labCityName,
+                    lo.bookingDate,
+                    lo.bookingTime,
+                    lo.orderStatus,
+                    lo.labReportURL
+                ORDER BY lo.id desc
+            `;
+            if (tab) {
+                replacements.orderStatuses = tab.orderStatuses;
+            } else {
+                replacements.status = status;
+            }
+            return await sequelizeDB1.query(query, {
+                replacements,
+                type: QueryTypes.SELECT
+            });
+        } catch (error) {
+            throw new Error(`Error fetching lab orders: ${error.message}`);
+        }
+    };
+
+    // "lab bookings by status" graph for the hr portal, one entry per list tab with the same filter and search
+    static async getLabOrderStatusSummaryForHr(search, filter, companyId) {
+        try {
+            const { where, replacements } = this.buildHrLabOrderConditions(search, filter, companyId);
+            const rows = await sequelizeDB1.query(`
+                SELECT orders.orderStatus, COUNT(*) AS count
+                FROM (
+                    SELECT lo.id, lo.orderStatus
+                    FROM labOrders lo
+                    JOIN labOrderDetails lod ON lo.id = lod.labOrderId
+                    LEFT JOIN labs l ON lo.labId = l.id
+                    JOIN patient p ON lo.patientId = p.id
+                    WHERE ${where}
+                    GROUP BY lo.id, lo.orderStatus
+                ) orders
+                GROUP BY orders.orderStatus
+            `, { replacements, type: QueryTypes.SELECT });
+
+            const countByStatus = {};
+            rows.forEach(row => { countByStatus[row.orderStatus] = Number(row.count) || 0; });
+
+            const statusWise = HR_LAB_STATUS_TABS.map(tab => ({
+                key: tab.key,
+                label: tab.label,
+                status: tab.status,
+                color: tab.color,
+                count: tab.orderStatuses.reduce((sum, orderStatus) => sum + (countByStatus[orderStatus] || 0), 0),
+            }));
+            const totalBookings = statusWise.reduce((sum, item) => sum + item.count, 0);
+            const percentOf = (count) => totalBookings ? Math.round((count / totalBookings) * 1000) / 10 : 0;
+            statusWise.forEach(item => { item.percentage = percentOf(item.count); });
+
+            const countOf = (key) => statusWise.find(item => item.key === key).count;
+            return {
+                period: HR_LAB_FILTER_LABELS[filter] || HR_LAB_FILTER_LABELS.all,
+                totalBookings,
+                // a booking is complete once its report is received
+                completionPercentage: Math.round(percentOf(countOf('reportReceived'))),
+                cancelledPercentage: Math.round(percentOf(countOf('cancelled'))),
+                statusWise,
+            };
+        } catch (error) {
+            throw new Error(`Error fetching lab order summary: ${error.message}`);
         }
     };
 

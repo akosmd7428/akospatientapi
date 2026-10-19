@@ -64,6 +64,41 @@ class HrController {
             CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
+    // the company the hr user is working on: must be one of the companies on their own hr row,
+    // the companyId header only picks one of them (the full list is sent before a company is selected)
+    static async resolveHrCompanyId(req) {
+        if (!req.user || req.user.role !== 'hr') return null;
+        const hr = await Hr.findByPk(req.user.id, { attributes: ['id', 'companyId', 'isActive', 'isDeleted'] });
+        if (!hr || hr.isActive == 0 || hr.isDeleted == 1) return null;
+        const hrCompanyIds = String(hr.companyId ?? '').split(',')
+            .map(id => parseInt(id.trim(), 10))
+            .filter(id => Number.isInteger(id) && id > 0);
+        if (!hrCompanyIds.length) return null;
+
+        const header = String(req.header('companyId') ?? '').trim();
+        if (!header || header.includes(',')) return hrCompanyIds[0];
+        const selected = Number(header);
+        return hrCompanyIds.includes(selected) ? selected : null;
+    }
+
+    static async getLabTests(req, res) {
+        try {
+            const companyId = await HrController.resolveHrCompanyId(req);
+            if (!companyId) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, 'Access denied');
+            }
+            const { status, search, filter } = req.query;
+            // the graph uses the same company, filter and search as the list, across all tabs
+            const [labTests, labTestSummary] = await Promise.all([
+                labTestService.getLabOrdersForHr(status, search, filter, companyId),
+                labTestService.getLabOrderStatusSummaryForHr(search, filter, companyId),
+            ]);
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.labTestsFetched, { labTests, labTestSummary });
+        } catch (error) {
+            CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
+    }
+
     static async createOrUpdateProfile(req, res, next) {
         const { name, email, phone, gender, age, profilePic,id } = req.body;
         try {       
