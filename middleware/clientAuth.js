@@ -1,57 +1,48 @@
-const crypto = require('crypto');
+const AuthController = require('../controllers/authController');
+const PatientService = require('../services/patientService');
 const CommonHelper = require('../helpers/commonHelper');
+const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
 
 const CLIENT_ID_HEADER = 'x-client-id';
 const CLIENT_SECRET_HEADER = 'x-client-secret';
 
-// API_CLIENTS is a comma separated list of clientId:secret pairs, e.g. "patient-portal:xxxx,care-navigator:yyyy"
-const loadClients = () => {
-    const clients = new Map();
-    (process.env.API_CLIENTS || '').split(',').forEach((entry) => {
-        const index = entry.indexOf(':');
-        if (index <= 0) return;
-        const clientId = entry.slice(0, index).trim();
-        const secret = entry.slice(index + 1).trim();
-        if (clientId && secret) clients.set(clientId, secret);
-    });
-    return clients;
+// the api client sends its client id and secret in the headers (or client_id / client_secret in the body),
+// they are checked against the company table (Laravel encrypted secret, api access and ip whitelist) before the
+// request goes on, the request body is left untouched
+const getCredentials = (req) => {
+    const body = req.body || {};
+    if (req.header(CLIENT_ID_HEADER) || req.header(CLIENT_SECRET_HEADER)) {
+        return { clientId: req.header(CLIENT_ID_HEADER), clientSecret: req.header(CLIENT_SECRET_HEADER) };
+    }
+    // with parent_client_id the secret in the body belongs to the parent company
+    return { clientId: body.parent_client_id || body.client_id, clientSecret: body.client_secret };
 };
 
-const clients = loadClients();
+const clientAuth = async (req, res, next) => {
+    try {
+        const { clientId, clientSecret } = getCredentials(req);
 
-// hash both sides so timingSafeEqual always compares equal lengths and the secret length is not leaked
-const safeEqual = (a, b) => {
-    const ha = crypto.createHash('sha256').update(String(a)).digest();
-    const hb = crypto.createHash('sha256').update(String(b)).digest();
-    return crypto.timingSafeEqual(ha, hb);
-};
+        if (!clientId || !clientSecret) {
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, 'Client credentials are missing');
+        }
 
-const clientAuth = (req, res, next) => {
-    if (clients.size === 0) {
-        return CommonHelper.sendErrorUnencrypt(
-            res,
-            STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR,
-            'API_CLIENTS is not configured on the server'
-        );
+        const companyDetails = await PatientService.getCompanyDetails(clientId);
+        if (!companyDetails[0]) {
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_client);
+        }
+
+        const clientCheck = AuthController.validateSsoClient(companyDetails[0], clientSecret, CommonHelper.getClientIp(req));
+        if (!clientCheck.valid) {
+            return CommonHelper.sendErrorUnencrypt(res, clientCheck.statusCode, clientCheck.message);
+        }
+
+        const { client_secret, ...company } = companyDetails[0];
+        req.apiClient = company;
+        next();
+    } catch (error) {
+        next(error);
     }
-
-    const clientId = req.header(CLIENT_ID_HEADER);
-    const clientSecret = req.header(CLIENT_SECRET_HEADER);
-    const expected = clientId ? clients.get(clientId) : undefined;
-
-    // still run the comparison for an unknown client id so the response time does not reveal valid ids
-    const valid = safeEqual(clientSecret || '', expected || crypto.randomBytes(32).toString('hex'));
-    if (!clientId || !clientSecret || !expected || !valid) {
-        return CommonHelper.sendErrorUnencrypt(
-            res,
-            STATUS_CODE.HTTP_401_UNAUTHORIZED,
-            'Invalid or missing client credentials'
-        );
-    }
-
-    req.apiClientId = clientId;
-    next();
 };
 
 module.exports = clientAuth;

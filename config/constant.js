@@ -15,4 +15,13 @@ const BEHAVIOURAL_HEALTH = {
     STRING_END: " to be suffering with depression and report many of the common symptoms."
 };
 
-module.exports = { STATUS_CODE, BEHAVIOURAL_HEALTH };
+// sso client login "redirect_page" values and the patient frontend path they open (the base url is PATIENT_FRONTEND_URL)
+const SSO_REDIRECT_PAGES = {
+    'lab booking': '/LabTests',
+    'talk to doctor': '/TalkToDoctor',
+};
+
+// opened when no redirect_page is sent
+const SSO_DEFAULT_REDIRECT_PATH = '/dashboard';
+
+module.exports = { STATUS_CODE, BEHAVIOURAL_HEALTH, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH };

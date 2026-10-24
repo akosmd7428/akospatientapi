@@ -1406,6 +1406,7 @@ class PatientService {
         type: QueryTypes.SELECT,
         replacements
         });   
+        //console.log(result);
         return result;  
     }
     // get child company details by its client id (employer_id) under a given parent company id
@@ -1424,6 +1425,76 @@ class PatientService {
         replacements
         });
         return result;
+    }
+    // random 6 digit employer_id that is not used by any company yet
+    static async generateUniqueEmployerId(transaction){
+        for (let attempt = 0; attempt < 10; attempt++) {
+            const candidate = String(crypto.randomInt(100000, 1000000));
+            const exists = await sequelizeDB1.query('SELECT id FROM worksman_company_list WHERE employer_id = :employer_id LIMIT 1', {
+                type: QueryTypes.SELECT,
+                replacements: { employer_id: candidate },
+                transaction
+            });
+            if (!exists[0]) {
+                return candidate;
+            }
+        }
+        throw new Error('Unable to generate a unique 6 digit employer_id');
+    }
+    // find the child company under the parent company by its client id (employer_id), or by company_name when no client id
+    // is sent, it is created when it does not exist yet (employer_id = the client id, or a new generated one)
+    // returns { company } or { error } when the client id belongs to a company outside this parent or the name is missing
+    static async findOrCreateChildCompany(parent_id, client_id, company_name){
+        const name = company_name ? String(company_name).trim() : '';
+
+        return sequelizeDB1.transaction(async (transaction) => {
+            // lock the parent row so two logins for the same new company cannot both create it
+            await sequelizeDB1.query('SELECT id FROM worksman_company_list WHERE id = :parent_id FOR UPDATE', {
+                type: QueryTypes.SELECT,
+                replacements: { parent_id },
+                transaction
+            });
+
+            const existing = client_id
+                // any company with this employer_id, also inactive ones and the ones of other parents, the id must stay unique
+                ? await sequelizeDB1.query('SELECT * FROM worksman_company_list wl WHERE wl.employer_id = :employer_id LIMIT 1', {
+                    type: QueryTypes.SELECT,
+                    replacements: { employer_id: String(client_id) },
+                    transaction
+                })
+                : await sequelizeDB1.query('SELECT * FROM worksman_company_list wl WHERE wl.active = 1 AND wl.parent_id = :parent_id AND wl.company_name = :company_name LIMIT 1', {
+                    type: QueryTypes.SELECT,
+                    replacements: { parent_id: String(parent_id), company_name: name },
+                    transaction
+                });
+            if (existing[0]) {
+                // a client id of a company outside this parent (or a disabled one) is never taken over
+                if (String(existing[0].parent_id) !== String(parent_id) || Number(existing[0].active) !== 1) {
+                    return { error: 'client_not_under_parent' };
+                }
+                return { company: existing[0] };
+            }
+            if (!name) {
+                return { error: 'company_name_required' };
+            }
+
+            const employer_id = client_id ? String(client_id) : await PatientService.generateUniqueEmployerId(transaction);
+            const [insertId] = await sequelizeDB1.query(
+                `INSERT INTO worksman_company_list (company_name, employer_id, parent_id, active) VALUES (:company_name, :employer_id, :parent_id, 1)`,
+                {
+                    type: QueryTypes.INSERT,
+                    replacements: { company_name: name, employer_id, parent_id: String(parent_id) },
+                    transaction
+                }
+            );
+            // packages, tests and doctors are not copied from the parent, they are assigned to the new company manually
+            const created = await sequelizeDB1.query('SELECT * FROM worksman_company_list WHERE id = :id', {
+                type: QueryTypes.SELECT,
+                replacements: { id: insertId },
+                transaction
+            });
+            return { company: created[0] };
+        });
     }
     // create patient for the sso client login (no email verification, identity is trusted by the client)
     static async createSsoPatient(first_name, last_name, email, mobile, company_id, uuid, hash_password){

@@ -42,9 +42,17 @@ const externalSignupSchema = Joi.object({
 });
 
 // sso login for an api client, parent_client_id is optional and only sent by a parent company
+// with parent_client_id the company is either client_id (the parent or an existing child) or company_name,
+// which is found or created under the parent, so one of the two is required
+const hasValue = Joi.string().trim().min(1).required();
 const ssoClientLoginSchema = Joi.object({
   parent_client_id: Joi.string().allow('', null).optional(),
-  client_id: Joi.string().required(),
+  client_id: Joi.string().when('parent_client_id', { is: hasValue, then: Joi.allow('', null).optional(), otherwise: Joi.required() }),
+  company_name: Joi.string().trim().max(255).when('parent_client_id', {
+    is: hasValue,
+    then: Joi.when('client_id', { is: hasValue, then: Joi.allow('', null).optional(), otherwise: Joi.required() }),
+    otherwise: Joi.allow('', null).optional(),
+  }),
   client_secret: Joi.string().required(),
   email: Joi.string().email().required(),
   mobile: Joi.string().allow('', null).optional(),
@@ -53,6 +61,7 @@ const ssoClientLoginSchema = Joi.object({
   last_name: Joi.string().allow('', null).optional(),
   lastname: Joi.string().allow('', null).optional(),
   'last-name': Joi.string().allow('', null).optional(),
+  redirect_page: Joi.string().allow('', null).optional(),
 }).or('firstname', 'first_name');
 
 // generate a one time sso login code for a patient

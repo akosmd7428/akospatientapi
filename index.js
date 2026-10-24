@@ -57,7 +57,7 @@ const DEFAULT_CORS_ORIGINS = 'https://carenavigator.akosmd.in,https://360.akosmd
 const corsOptions = {
   origin: (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim()).filter(Boolean),
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-  allowedHeaders: ['Content-Type', 'Authorization', 'role', 'companyId', 'x-sync-api-key'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'role', 'companyId', 'x-sync-api-key','x-client-id','x-client-secret'],
 };
 
 app.use(cors(corsOptions));

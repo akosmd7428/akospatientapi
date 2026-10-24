@@ -111,6 +111,7 @@ const messages = {
     sso_api_access_denied: "API access is not enabled for this client.",
     sso_ip_not_whitelisted: "Your IP address is not whitelisted for this client.",
     sso_client_not_under_parent: "The client id does not belong to the given parent client id.",
+    sso_company_name_required: "company_name is required to create the company under the parent client.",
     sso_user_other_client: "This user belongs to another client.",
     sso_code_generated: "SSO login code generated successfully.",
     sso_patient_not_found: "No patient found with the provided patient id.",

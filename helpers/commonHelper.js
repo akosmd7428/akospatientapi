@@ -117,23 +117,44 @@ class CommonHelper {
         return verificationLink;
     }
 
-    // resolve the caller ip, the api is served behind a proxy so x-forwarded-for wins
+    // resolve the caller ip, req.ip follows the 'trust proxy' setting so a client cannot spoof it with its own x-forwarded-for
     static getClientIp(req) {
-        const forwarded = req.headers['x-forwarded-for'];
-        let ip = '';
-
-        if (forwarded) {
-            ip = forwarded.split(',')[0].trim();
-        } else {
-            ip = req.headers['x-real-ip'] || req.ip || (req.connection && req.connection.remoteAddress) || '';
-        }
+        let ip = req.ip || (req.socket && req.socket.remoteAddress) || '';
         // strip the ipv4 mapped ipv6 prefix (::ffff:127.0.0.1) and the ipv6 loopback
         ip = String(ip).replace(/^::ffff:/i, '');
 
         return ip === '::1' ? '127.0.0.1' : ip;
     }
 
+    static ipToLong(ip) {
+        const parts = String(ip).split('.');
+        if (parts.length !== 4 || parts.some(part => !/^\d+$/.test(part) || Number(part) > 255)) {
+            return null;
+        }
+        return ((Number(parts[0]) << 24) >>> 0) + (Number(parts[1]) << 16) + (Number(parts[2]) << 8) + Number(parts[3]);
+    }
+
+    // exact ip or ipv4 cidr (203.0.113.0/24), same rules as the Laravel WorksmanCompanyList::ipMatchesRule
+    static ipMatchesRule(ip, rule) {
+        if (!rule.includes('/')) {
+            return ip === rule;
+        }
+        const [subnet, bitsStr] = rule.split('/', 2);
+        if (!/^\d+$/.test(bitsStr) || Number(bitsStr) > 32) {
+            return false;
+        }
+        const bits = Number(bitsStr);
+        const ipLong = CommonHelper.ipToLong(ip);
+        const subnetLong = CommonHelper.ipToLong(subnet);
+        if (ipLong === null || subnetLong === null) {
+            return false;
+        }
+        const mask = bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0;
+        return ((ipLong & mask) >>> 0) === ((subnetLong & mask) >>> 0);
+    }
+
     // match an ip against a stored whitelist, entries can be separated by comma, semicolon, space or new line
+    // an entry is an exact ip, an ipv4 cidr range or * for any ip
     static isIpWhitelisted(ip, whitelist) {
         if (!whitelist) {
             return false;
@@ -149,7 +170,7 @@ class CommonHelper {
         if (allowedIps.includes('*')) {
             return true;
         }
-        return allowedIps.includes(ip);
+        return allowedIps.some(rule => CommonHelper.ipMatchesRule(ip, rule));
     }
 
     // constant time comparison for secrets so the response time does not leak the value

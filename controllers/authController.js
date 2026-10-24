@@ -3,8 +3,9 @@ const Patient = require('../models/patientModel');
 const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient');
 const SsoLoginCode = require('../models/ssoLoginCode');
 const { messages } = require('../config/language');
-const { STATUS_CODE } = require('../config/constant');
+const { STATUS_CODE, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH } = require('../config/constant');
 const CommonHelper = require('../helpers/commonHelper');
+const { laravelDecrypt } = require('../helpers/laravelCrypt');
 const PatientService = require('../services/patientService');
 const { logError } = require('../helpers/logErrorHelper');
 const { redact } = require('../helpers/redact');
@@ -74,8 +75,10 @@ class AuthController {
   }
 
   // validate the credentials of an api client: client_secret, api_access and the ip whitelist
+  // the stored client_secret is encrypted by the Laravel admin (Crypt::encryptString), it is decrypted with APP_KEY_LARAVEL first
   static validateSsoClient(company, client_secret, clientIp) {
-    if (!CommonHelper.secureCompare(client_secret, company.client_secret || '')) {
+    const storedSecret = company.client_secret ? laravelDecrypt(company.client_secret) : null;
+    if (storedSecret === null || !CommonHelper.secureCompare(client_secret, storedSecret)) {
       return { valid: false, statusCode: STATUS_CODE.HTTP_401_UNAUTHORIZED, message: messages.sso_invalid_client_secret };
     }
     if (Number(company.api_access) !== 1) {
@@ -88,9 +91,10 @@ class AuthController {
   }
 
   // validate the api client and find the patient, the patient is created when it does not exist yet
-  // the credentials are checked on the parent company when parent_client_id is sent
+  // the credentials are checked on the parent company when parent_client_id is sent, the patient then belongs to
+  // the parent itself (client_id = parent_client_id) or a child company of the parent (created when it does not exist yet)
   static async resolveSsoPatient(req) {
-    const { parent_client_id, client_id, client_secret, email, mobile } = req.body;
+    const { parent_client_id, client_id, client_secret, company_name, email, mobile } = req.body;
     const first_name = req.body.firstname || req.body.first_name;
     const last_name = req.body.last_name || req.body.lastname || req.body['last-name'] || '';
     const clientIp = CommonHelper.getClientIp(req);
@@ -107,20 +111,26 @@ class AuthController {
       if (!parentCheck.valid) {
         return { error: parentCheck };
       }
-      // the client id is either the parent itself or one of its child companies
-      if (String(client_id) === String(parent_client_id)) {
+      // client id equal to the parent: the user belongs to the parent itself, otherwise to a child company of the parent,
+      // which is created (with company_name) when it does not exist yet
+      if (client_id && String(client_id) === String(parent_client_id)) {
         company = parentCompany;
       } else {
-        const childCompanyDetails = await PatientService.getCompanyDetailsByParent(client_id, parentCompany.id);
-        if (!childCompanyDetails[0]) {
-          return { error: { statusCode: STATUS_CODE.HTTP_401_UNAUTHORIZED, message: messages.sso_client_not_under_parent } };
+        const child = await PatientService.findOrCreateChildCompany(parentCompany.id, client_id, company_name);
+        if (child.error === 'client_not_under_parent') {
+          return { error: { statusCode: STATUS_CODE.HTTP_403_FORBIDDEN, message: messages.sso_client_not_under_parent } };
         }
-        company = childCompanyDetails[0];
+        if (child.error === 'company_name_required') {
+          return { error: { statusCode: STATUS_CODE.HTTP_400_BAD_REQUEST, message: messages.sso_company_name_required } };
+        }
+        company = child.company;
       }
     } else {
       // credentials belong to the company itself
       const companyDetails = await PatientService.getCompanyDetails(client_id);
       if (!companyDetails[0]) {
+
+        console.log("ddh",companyDetails[0]);
         return { error: { statusCode: STATUS_CODE.HTTP_401_UNAUTHORIZED, message: messages.sso_invalid_client } };
       }
       company = companyDetails[0];
@@ -168,7 +178,7 @@ class AuthController {
   }
 
   // create the login token and the patient details returned by the sso apis
-  static async ssoLoginResponse(res, patient) {
+  static async ssoLoginResponse(res, patient, additionalData = {}) {
     const { token } = await AuthService.patientLogin(patient);
     const userDetails = await PatientService.getPatientDetailsByEmail(patient.email, patient);
     if (userDetails.length === 0) {
@@ -176,17 +186,35 @@ class AuthController {
     }
     userDetails.role = "patient";
 
-    return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails });
+    return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails, ...additionalData });
   }
 
-  // sso login for an api client, the login token is returned directly
+  // frontend url for the sso "redirect_page" ("lab booking", "talk to doctor"), the dashboard when it is not sent,
+  // null for an unknown page; case, extra spaces, "_" and "-" are ignored so "Lab_Booking" works too
+  static getSsoRedirectUrl(redirectPage) {
+    const baseUrl = String(PATIENT_FRONTEND_URL || '').replace(/\/+$/, '');
+    if (!redirectPage || !String(redirectPage).trim()) {
+      return `${baseUrl}${SSO_DEFAULT_REDIRECT_PATH}`;
+    }
+    const page = String(redirectPage).toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const path = SSO_REDIRECT_PAGES[page];
+    return path ? `${baseUrl}${path}` : null;
+  }
+
+  // sso login for an api client, the login token is returned directly with the frontend url to open
   static async ssoClientLogin(req, res, next) {
     try {
+      const redirect_url = AuthController.getSsoRedirectUrl(req.body.redirect_page);
+      if (redirect_url === null) {
+        const allowedPages = Object.keys(SSO_REDIRECT_PAGES).join(', ');
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, `Invalid redirect_page, allowed values: ${allowedPages}`);
+      }
+
       const { patient, error } = await AuthController.resolveSsoPatient(req);
       if (error) {
         return CommonHelper.sendErrorUnencrypt(res, error.statusCode, error.message);
       }
-      return await AuthController.ssoLoginResponse(res, patient);
+      return await AuthController.ssoLoginResponse(res, patient, { redirect_url });
     } catch (error) {
       AuthController.logAuthError(error, req);
       return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
