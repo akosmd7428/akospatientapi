@@ -39,6 +39,7 @@ const DATA_ENCRYPTION_IV = process.env.DATA_ENCRYPTION_IV;
 const AES_SECRET_KEY = process.env.AES_SECRET_KEY;
 const PRESCRIPTION_LINK_SECRET = process.env.PRESCRIPTION_LINK_SECRET;
 const BITLY_ACCESS_TOKEN = process.env.BITLY_ACCESS_TOKEN;
+const ALGORITHM = process.env.ALGORITHM;
 
 // stop the app at startup when a required security value is missing from .env
 const REQUIRED_SECURITY_ENV = ['JWT_SECRET', 'DATA_ENCRYPTION_KEY', 'DATA_ENCRYPTION_IV', 'AES_SECRET_KEY', 'PRESCRIPTION_LINK_SECRET'];
@@ -91,5 +92,6 @@ module.exports = {
     DATA_ENCRYPTION_IV,
     AES_SECRET_KEY,
     PRESCRIPTION_LINK_SECRET,
-    BITLY_ACCESS_TOKEN
+    BITLY_ACCESS_TOKEN,
+    ALGORITHM
 };
