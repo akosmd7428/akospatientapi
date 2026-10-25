@@ -1,6 +1,6 @@
 const crypto = require('crypto');
-const { AES_SECRET_KEY } = require('../config/secret');
-const algorithm = 'aes-256-cbc';
+const { AES_SECRET_KEY,ALGORITHM } = require('../config/secret');
+const algorithm = ALGORITHM;
 const ivLength = 16; // Initialization vector length in bytes
 
 // Function to encrypt data

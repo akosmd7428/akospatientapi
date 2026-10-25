@@ -20,7 +20,7 @@ const ssoGenerateCodeAuth = (req, res, next) => {
 
 // removed: /register (unverified accounts, bcrypt hash that login can never match), /encrypt, /decrypt, /getquery (debug decryption oracle),
 // /ssologin (unauthenticated company/patient creation, the hr portal calls the ohc api for it), /external-signup-old (no email verification)
-router.post('/login',validateDataEncryption(),validateSchema(loginSchema), AuthController.login);
+router.post('/login',validateSchema(loginSchema), AuthController.login);
 router.post('/sso-client-login', clientAuth, validateSchema(ssoClientLoginSchema), AuthController.ssoClientLogin);
 router.post('/sso-generate-code', ssoGenerateCodeAuth, validateDataEncryption(), validateSchema(ssoGenerateCodeSchema), AuthController.ssoGenerateCode);
 router.post('/sso-verify-code',validateDataEncryption(),validateSchema(ssoVerifyCodeSchema), AuthController.ssoVerifyCode);

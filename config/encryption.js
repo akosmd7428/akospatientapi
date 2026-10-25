@@ -1,8 +1,8 @@
 //import crypto from 'crypto';
 const crypto = require('crypto');
-const { DATA_ENCRYPTION_KEY, DATA_ENCRYPTION_IV } = require('./secret');
+const { DATA_ENCRYPTION_KEY, DATA_ENCRYPTION_IV, ALGORITHM } = require('./secret');
 // Define the encryption method and key
-const algorithm = 'aes-256-cbc'; // AES-256 requires a 32-byte key
+const algorithm = ALGORITHM; // AES-256 requires a 32-byte key
 const key = DATA_ENCRYPTION_KEY; // 32 characters, from .env
 const iv = DATA_ENCRYPTION_IV; // 16 bytes as hex, from .env
 const ivBuffer = Buffer.from(iv, 'hex');
