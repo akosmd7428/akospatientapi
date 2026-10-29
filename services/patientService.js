@@ -17,6 +17,8 @@ const Doctor = require('../models/doctorModel');
 const Appointment = require('../models/appointmentModel');
 const CarePlan = require('../models/carePlan');
 const crypto = require('crypto');
+// most patients returned by the company patient lookup (ohc sync)
+const COMPANY_PATIENT_LOOKUP_LIMIT = 50;
 
 class PatientService {
 
@@ -1521,8 +1523,42 @@ class PatientService {
             const [lastId] = await sequelizeDB1.query(query, {
                 type: QueryTypes.INSERT,
                 replacements: replacements
-            }); 
+            });
 
+    }
+
+    // patient lookup: id, name and email of the active patients of a company, search matches the full name or the email,
+    // at most COMPANY_PATIENT_LOOKUP_LIMIT matches so an empty search does not return the whole company
+    static async getCompanyPatients(companyId, search) {
+        let where = `
+            WHERE
+                (p.companyId = :companyId OR p.employer_id = :companyId)
+                AND p.is_active = 1
+        `;
+        const replacements = { companyId };
+        if (search) {
+            where += ` AND (
+                CONCAT(p.first_name, ' ', IFNULL(p.last_name, '')) LIKE :search OR
+                p.email LIKE :search
+            )`;
+            // % and _ typed by the user are matched as plain characters
+            replacements.search = `%${search.replace(/[\\%_]/g, '\\$&')}%`;
+        }
+
+        return sequelizeDB1.query(`
+            SELECT
+                p.id,
+                TRIM(CONCAT(p.first_name, ' ', IFNULL(p.last_name, ''))) AS name,
+                p.email
+            FROM
+                patient p
+            ${where}
+            ORDER BY p.first_name, p.last_name, p.id
+            LIMIT :limit
+        `, {
+            type: QueryTypes.SELECT,
+            replacements: { ...replacements, limit: COMPANY_PATIENT_LOOKUP_LIMIT }
+        });
     }
 }
 

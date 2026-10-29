@@ -87,6 +87,13 @@ const createOrUpdatePatientSchema = Joi.object({
     dependents: Joi.array().allow(null),
 });
 
+// patient lookup of a company for the ohc backend, search matches the patient name or email
+const companyPatientListSchema = Joi.object({
+    companyId: Joi.number().integer().positive().required(),
+    search: Joi.string().trim().max(100).allow('').optional(),
+});
+
 module.exports = {
     createOrUpdatePatientSchema,
+    companyPatientListSchema,
 };

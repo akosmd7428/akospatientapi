@@ -68,6 +68,7 @@ const messages = {
     labOrderNotFound: 'Lab order not found',
     patientDetailsFetched: "Patient details fetched successfully",
     labTestsFetched: "Lab tests fetched successfully.",
+    companyPatientsFetched: "Company patients fetched successfully.",
     cartNotFound: "Cart is empty!",
     cartUpdated: 'Cart updated successfully',
     cartItemsRemoved: "Cart items has been removed successfully",
