@@ -174,6 +174,15 @@ class AuthController {
       return { error: { statusCode: STATUS_CODE.HTTP_404_NOT_FOUND, message: "No patient found with the provided email." } };
     }
 
+    // dependants are created as family members of the patient, a failure here is logged and does not stop the login
+    if (Array.isArray(req.body.dependants) && req.body.dependants.length > 0) {
+      try {
+        await PatientService.createSsoDependants(patient, req.body.dependants, company.id);
+      } catch (error) {
+        AuthController.logAuthError(error, req);
+      }
+    }
+
     return { patient, company };
   }
 

@@ -55,13 +55,29 @@ const ssoClientLoginSchema = Joi.object({
   }),
   client_secret: Joi.string().required(),
   email: Joi.string().email().required(),
+
   mobile: Joi.string().allow('', null).optional(),
+  member_id: Joi.string().allow('', null).optional(),
   firstname: Joi.string().optional(),
   first_name: Joi.string().optional(),
   last_name: Joi.string().allow('', null).optional(),
   lastname: Joi.string().allow('', null).optional(),
   'last-name': Joi.string().allow('', null).optional(),
   redirect_page: Joi.string().allow('', null).optional(),
+  gender: Joi.string().trim().max(20).allow('', null).optional(),
+  plan_id: Joi.number().integer().allow('', null).optional(),
+  // family members of the user, every field is optional
+  dependants: Joi.array().max(20).items(Joi.object({
+    member_id: Joi.alternatives().try(Joi.string().trim().max(50), Joi.number()).allow('', null).optional(),
+    guardian_email: Joi.string().email().allow('', null).optional(),
+    first_name: Joi.string().trim().max(100).allow('', null).optional(),
+    last_name: Joi.string().trim().max(100).allow('', null).optional(),
+    email: Joi.string().email().allow('', null).optional(),
+    date_of_birth: Joi.string().trim().max(20).allow('', null).optional(),
+    gender: Joi.string().trim().max(20).allow('', null).optional(),
+    mobile_number: Joi.string().trim().max(20).allow('', null).optional(),
+    relation: Joi.string().trim().max(50).allow('', null).optional(),
+  })).allow(null).optional(),
 }).or('firstname', 'first_name');
 
 // generate a one time sso login code for a patient

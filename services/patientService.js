@@ -1496,6 +1496,64 @@ class PatientService {
             return { company: created[0] };
         });
     }
+    // email for a dependant sent without one: member_id (or the patient's uniquePatientId) + first_name @ the patient's email domain
+    static buildSsoDependantEmail(patient, dependant) {
+        const domain = String(patient.email || '').split('@')[1];
+        const memberId = dependant.member_id || patient.uniquePatientId;
+        const localPart = `${memberId ?? ''}${dependant.first_name}`.toLowerCase().replace(/[^a-z0-9._-]/g, '');
+        return domain && localPart ? `${localPart}@${domain.toLowerCase()}` : null;
+    }
+
+    // create the dependants sent by an sso client as family members (parent_id) of the patient, in the patient's company,
+    // a dependant whose email already exists is skipped, so the same list can be sent on every login
+    static async createSsoDependants(patient, dependants, fallbackCompanyId) {
+        const companyId = patient.companyId || patient.employer_id || fallbackCompanyId || null;
+        const createdIds = [];
+        for (const dependant of dependants) {
+            const first_name = String(dependant.first_name || '').trim();
+            if (!first_name) {
+                continue; // a dependant cannot be created without a name
+            }
+            const email = String(dependant.email || '').trim().toLowerCase()
+                || PatientService.buildSsoDependantEmail(patient, { ...dependant, first_name });
+            if (!email) {
+                continue;
+            }
+
+            const existing = await Patient.findOne({ where: { email }, attributes: ['id', 'parent_id', 'companyId', 'employer_id'] });
+            if (existing) {
+                // created on an earlier login, or the email belongs to another account which is never taken over
+                if (Number(existing.parent_id) !== Number(patient.id)) {
+                    console.warn(`sso dependant skipped, email already used by patient ${existing.id}`);
+                } else if (companyId && (Number(existing.companyId) !== Number(companyId) || Number(existing.employer_id) !== Number(companyId))) {
+                    // a dependant of this patient always follows the patient's company
+                    await existing.update({ companyId, employer_id: companyId });
+                }
+                continue;
+            }
+
+            const created = await Patient.create({
+                first_name,
+                last_name: String(dependant.last_name || '').trim(),
+                email,
+                dateofbirth: dependant.date_of_birth || null,
+                gender: dependant.gender || null,
+                phone: dependant.mobile_number || null,
+                parent_id: patient.id,
+                companyId,
+                employer_id: companyId,
+            });
+            if (dependant.member_id) {
+                // member_id is not in the Patient model yet, written directly so the other patient queries are not affected
+                await sequelizeDB1.query('UPDATE patient SET member_id = :member_id WHERE id = :id', {
+                    type: QueryTypes.UPDATE,
+                    replacements: { member_id: String(dependant.member_id), id: created.id }
+                });
+            }
+            createdIds.push(created.id);
+        }
+        return createdIds;
+    }
     // create patient for the sso client login (no email verification, identity is trusted by the client)
     static async createSsoPatient(first_name, last_name, email, mobile, company_id, uuid, hash_password){
         const uniqueId = Math.floor(100000 + Math.random() * 900000).toString();
