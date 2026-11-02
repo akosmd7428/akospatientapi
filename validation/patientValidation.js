@@ -93,7 +93,19 @@ const companyPatientListSchema = Joi.object({
     search: Joi.string().trim().max(100).allow('').optional(),
 });
 
+// create a patient of a company for the ohc backend, phone is optional
+const ohcCreatePatientSchema = Joi.object({
+    company_id: Joi.number().integer().positive().required(),
+    email_id: Joi.string().trim().lowercase().email().max(255).required(),
+    phone: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).allow('', null).optional(),
+    date_of_birth: Joi.date().iso().max('now').raw().required(),
+    gender: Joi.string().trim().max(20).required(),
+    first_name: Joi.string().trim().max(100).required(),
+    last_name: Joi.string().trim().max(100).required(),
+});
+
 module.exports = {
     createOrUpdatePatientSchema,
     companyPatientListSchema,
+    ohcCreatePatientSchema,
 };

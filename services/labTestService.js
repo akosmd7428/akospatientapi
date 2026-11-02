@@ -1697,137 +1697,206 @@ ORDER BY
         }
     }
 
-    static async getLabOrdersByPatientId(orderId) {
-        const query = `
-          SELECT 
-    lo.id AS id,
-    lo.patientId,
-    lo.bookingDate,
-    lo.bookingTime,
-    labAddress.address AS bookingAddress,
-    labAddress.state AS state,
-    labAddress.city AS city,
-    labAddress.zip_code AS zip_code,   
-    lo.labId,
-    lo.labCityName,
-    lo.labBranchId,
-    lo.price,
-    lo.discountApplied,
-    lo.otherCharges,
-    lo.totalPrice,
-    lo.isPaid,
-    lo.orderStatus,
-    lo.paymentStatus,
-    lo.isActive,
-    lo.isDeleted,
-    lo.createdAt,
-    lo.updatedAt,
+    
+static async getLabOrdersByPatientId(orderId) {
+    const query = `
+        SELECT
+            lo.id AS id,
+            lo.patientId,
+            lo.bookingDate,
+            lo.bookingTime,
+            labAddress.address AS bookingAddress,
+            labAddress.state AS state,
+            labAddress.city AS city,
+            labAddress.zip_code AS zip_code,
+            lo.labId,
+            lo.labCityName,
+            lo.labBranchId,
+            lo.price,
+            lo.discountApplied,
+            lo.otherCharges,
+            lo.totalPrice,
+            lo.isPaid,
+            lo.orderStatus,
+            lo.paymentStatus,
+            lo.isActive,
+            lo.isDeleted,
+            lo.createdAt,
+            lo.updatedAt,
 
-    lod.id AS detailId,
-    lod.labOrderId,
-    lod.patientId AS detailPatientId,
-    lod.type AS detailType,
-    lod.referenceId,
-    lod.name,
-    lod.mode,
-    lod.noOfTest AS detailNoOfTest,
-    lod.price AS detailPrice,
-    lod.discount AS detailDiscount,
-    lod.total AS detailTotal,
-    lod.isActive AS detailIsActive,
-    lod.isDeleted AS detailIsDeleted,
-    lod.createdAt AS detailCreatedAt,
-    lod.updatedAt AS detailUpdatedAt,
-    lod.companyIdPackageTest,
-    lod.patientCompanyId,
+            lod.id AS detailId,
+            lod.labOrderId,
+            lod.patientId AS detailPatientId,
+            lod.type AS detailType,
+            lod.referenceId,
+            lod.name,
+            lod.mode,
+            lod.noOfTest AS detailNoOfTest,
+            lod.price AS detailPrice,
+            lod.discount AS detailDiscount,
+            lod.total AS detailTotal,
+            lod.isActive AS detailIsActive,
+            lod.isDeleted AS detailIsDeleted,
+            lod.createdAt AS detailCreatedAt,
+            lod.updatedAt AS detailUpdatedAt,
+            lod.companyIdPackageTest,
+            lod.patientCompanyId,
 
-    com.is_pament_required,
-    p.first_name,
-    p.email,
-    p.dateofbirth,
-    p.phone,
-    p.parent_id AS patientParentId,
+            com.is_pament_required,
+            p.first_name,
+            p.email,
+            p.dateofbirth,
+            p.phone,
+            p.parent_id AS patientParentId,
 
-    /* isFree of the company package (NULL when the item is not a company package) */
-    (
-        SELECT MIN(ccp.isFree)
-        FROM connectedCompaniesLabPackages ccp
-        WHERE ccp.companyId = lod.companyIdPackageTest
-          AND ccp.labPackageId = lod.referenceId
-          AND lod.type = 'Package'
-    ) AS packageIsFree,
+            /* Company package free configuration */
+            (
+                SELECT MIN(ccp.isFree)
+                FROM connectedCompaniesLabPackages ccp
+                WHERE ccp.companyId = lod.companyIdPackageTest
+                  AND ccp.labPackageId = lod.referenceId
+                  AND lod.type = 'Package'
+            ) AS packageIsFree,
 
-    /* Check previous successful order */
-    CASE
-        WHEN EXISTS (
-            SELECT 1
-            FROM labOrders previousOrder
-            INNER JOIN labOrderDetails previousDetail
-                ON previousOrder.id = previousDetail.labOrderId
-            WHERE 
-                previousOrder.patientId = lo.patientId
+            /*
+             * Check whether the patient has already consumed
+             * the free benefit for the same company package/test.
+             *
+             * Only Payment Completed / successful orders count.
+             * Pending orders do not count.
+             */
+            CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM labOrders previousOrder
+                    INNER JOIN labOrderDetails previousDetail
+                        ON previousOrder.id = previousDetail.labOrderId
+                    WHERE
+                        previousOrder.patientId = lo.patientId
 
-                /* Same company */
-                AND previousDetail.patientCompanyId = lod.patientCompanyId
+                        /* Same company */
+                        AND previousDetail.patientCompanyId = lod.patientCompanyId
 
-                /* Same package/test */
-                AND previousDetail.referenceId = lod.referenceId
+                        /* Same package/test */
+                        AND previousDetail.referenceId = lod.referenceId
+                        AND previousDetail.type = lod.type
 
-                /* Do not check current order */
-                AND previousOrder.id <> lo.id
+                        /* Previous order only */
+                        AND previousOrder.id < lo.id
 
-                /* Successful orders only */
-                AND previousOrder.orderStatus IN (
-                    'confirmed',
-                    'Report Generated',
-                     'Payment Completed',
-                     'Completed',
-                     'Reschedule',
-                     'Result Awaited'
+                        /* Previously consumed free benefit */
+                        AND previousOrder.totalPrice = 0
+                        AND previousOrder.orderStatus IN (
+                            'Payment Completed',
+                            'confirmed',
+                            'Report Generated',
+                            'Completed',
+                            'Reschedule',
+                            'Result Awaited'
+                        )
 
+                        /* Active records only */
+                        AND previousOrder.isActive = 1
+                        AND previousOrder.isDeleted = 0
+                        AND previousDetail.isActive = 1
+                        AND previousDetail.isDeleted = 0
                 )
+                THEN 1
+                ELSE 0
+            END AS alreadyOrdered
 
-                /* Active records only */
-                AND previousOrder.isActive = true
-                AND previousOrder.isDeleted = false
-                AND previousDetail.isActive = true
-                AND previousDetail.isDeleted = false
-        )
-        THEN 1
-        ELSE 0
-    END AS alreadyOrdered
+        FROM labOrders lo
 
-FROM labOrders lo
+        LEFT JOIN labOrderDetails lod
+            ON lo.id = lod.labOrderId
 
-LEFT JOIN labOrderDetails lod 
-    ON lo.id = lod.labOrderId
-LEFT JOIN patient p 
-    ON lo.patientId = p.id
+        LEFT JOIN patient p
+            ON lo.patientId = p.id
 
-LEFT JOIN worksman_company_list com 
-    ON lod.patientCompanyId = com.id
+        LEFT JOIN worksman_company_list com
+            ON lod.patientCompanyId = com.id
 
-LEFT JOIN labTestBookingAddress AS labAddress 
-    ON lo.patientId = labAddress.patientId
-    AND labAddress.createdAt = (
-        SELECT MAX(a.createdAt)
-        FROM labTestBookingAddress a
-        WHERE a.patientId = lo.patientId
-    )
+        LEFT JOIN labTestBookingAddress AS labAddress
+            ON lo.patientId = labAddress.patientId
+            AND labAddress.createdAt = (
+                SELECT MAX(a.createdAt)
+                FROM labTestBookingAddress a
+                WHERE a.patientId = lo.patientId
+            )
 
-WHERE 
-    lo.id = :orderId
-    AND lo.isActive = true
-    AND lo.isDeleted = false;
-        `;
+        WHERE
+            lo.id = :orderId
+            AND lo.isActive = 1
+            AND lo.isDeleted = 0;
+    `;
 
-        const results = await sequelizeDB1.query(query, {
-            replacements: { orderId },
-            type: QueryTypes.SELECT
-        });
-        
-        const orders = results.reduce((acc, row) => {
-            const {
+    const results = await sequelizeDB1.query(query, {
+        replacements: { orderId },
+        type: QueryTypes.SELECT
+    });
+
+    const orders = results.reduce((acc, row) => {
+
+        const {
+            id,
+            patientId,
+            bookingDate,
+            bookingTime,
+            bookingAddress,
+            labId,
+            labCityName,
+            labBranchId,
+            price,
+            discountApplied,
+            otherCharges,
+            totalPrice,
+            isPaid,
+            orderStatus,
+            paymentStatus,
+            noOfTest,
+            isActive,
+            isDeleted,
+            createdAt,
+            updatedAt,
+
+            detailId,
+            labOrderId,
+            detailPatientId,
+            detailType,
+            referenceId,
+            name,
+            mode,
+            detailNoOfTest,
+            detailPrice,
+            detailDiscount,
+            detailTotal,
+            detailIsActive,
+            detailIsDeleted,
+            detailCreatedAt,
+            detailUpdatedAt,
+
+            companyIdPackageTest,
+            patientCompanyId,
+            is_pament_required,
+            alreadyOrdered,
+            patientParentId,
+            packageIsFree,
+
+            state,
+            city,
+            zip_code,
+
+            first_name,
+            email,
+            dateofbirth,
+            phone
+
+        } = row;
+
+        let order = acc.find(o => String(o.id) === String(id));
+
+        if (!order) {
+            order = {
                 id,
                 patientId,
                 bookingDate,
@@ -1841,6 +1910,13 @@ WHERE
                 otherCharges,
                 totalPrice,
                 isPaid,
+                state,
+                city,
+                zip_code,
+                first_name,
+                email,
+                dateofbirth,
+                phone,
                 orderStatus,
                 paymentStatus,
                 noOfTest,
@@ -1848,105 +1924,313 @@ WHERE
                 isDeleted,
                 createdAt,
                 updatedAt,
-                detailId,
+                orderDetails: []
+            };
+
+            acc.push(order);
+        }
+
+        if (detailId) {
+
+            const isDependent = Number(patientParentId) > 0;
+
+            const isCompanyPackagePaid =
+                packageIsFree !== null &&
+                Number(packageIsFree) === 0;
+
+            const isCompanyAssigned =
+                companyIdPackageTest != null &&
+                patientCompanyId != null &&
+                Number(companyIdPackageTest) === Number(patientCompanyId);
+
+            const hasAlreadyUsedFree =
+                Number(alreadyOrdered) === 1;
+
+            const isFree =
+                !isDependent &&
+                !isCompanyPackagePaid &&
+                Number(is_pament_required) !== 1 &&
+                !hasAlreadyUsedFree &&
+                isCompanyAssigned;
+
+            order.orderDetails.push({
+                id: detailId,
                 labOrderId,
-                detailPatientId,
-                detailType,
+                patientId: detailPatientId,
+                type: detailType,
                 referenceId,
                 name,
                 mode,
-                detailNoOfTest,
-                detailPrice,
-                detailDiscount,
-                detailTotal,
-                detailIsActive,
-                detailIsDeleted,
-                detailCreatedAt,
-                detailUpdatedAt,
-                companyIdPackageTest,
-                patientCompanyId,
-                is_pament_required,
-                alreadyOrdered,
-                patientParentId,
-                packageIsFree,
-                state,
-                city,
-                zip_code,
+                noOfTest: detailNoOfTest,
+                price: detailPrice,
+                discount: detailDiscount,
+                total: detailTotal,
+                isActive: detailIsActive,
+                isDeleted: detailIsDeleted,
+                createdAt: detailCreatedAt,
+                updatedAt: detailUpdatedAt,
+                isFree: isFree ? 1 : 0
+            });
+        }
 
-                first_name,
-                email,
-                dateofbirth,
-                phone
+        return acc;
 
-            } = row;
+    }, []);
 
-            let order = acc.find(o => o.id === id);
-            if (!order) {
-                order = {
-                    id,
-                    patientId,
-                    bookingDate,
-                    bookingTime,
-                    bookingAddress,
-                    labId,
-                    labCityName,
-                    labBranchId,
-                    price,
-                    discountApplied,
-                    otherCharges,
-                    totalPrice,
-                    isPaid,
-                    state,
-                    city,
-                    zip_code,
-                    first_name,
-                    email,
-                    dateofbirth,
-                    phone,
-                    orderStatus,
-                    paymentStatus,
-                    noOfTest,
-                    isActive,
-                    isDeleted,
-                    createdAt,
-                    updatedAt,
-                    orderDetails: []
-                };
-                acc.push(order);
-            }
+    return orders;
+}
+
+
+//     static async getLabOrdersByPatientId(orderId) {
+//         const query = `
+//           SELECT 
+//     lo.id AS id,
+//     lo.patientId,
+//     lo.bookingDate,
+//     lo.bookingTime,
+//     labAddress.address AS bookingAddress,
+//     labAddress.state AS state,
+//     labAddress.city AS city,
+//     labAddress.zip_code AS zip_code,   
+//     lo.labId,
+//     lo.labCityName,
+//     lo.labBranchId,
+//     lo.price,
+//     lo.discountApplied,
+//     lo.otherCharges,
+//     lo.totalPrice,
+//     lo.isPaid,
+//     lo.orderStatus,
+//     lo.paymentStatus,
+//     lo.isActive,
+//     lo.isDeleted,
+//     lo.createdAt,
+//     lo.updatedAt,
+
+//     lod.id AS detailId,
+//     lod.labOrderId,
+//     lod.patientId AS detailPatientId,
+//     lod.type AS detailType,
+//     lod.referenceId,
+//     lod.name,
+//     lod.mode,
+//     lod.noOfTest AS detailNoOfTest,
+//     lod.price AS detailPrice,
+//     lod.discount AS detailDiscount,
+//     lod.total AS detailTotal,
+//     lod.isActive AS detailIsActive,
+//     lod.isDeleted AS detailIsDeleted,
+//     lod.createdAt AS detailCreatedAt,
+//     lod.updatedAt AS detailUpdatedAt,
+//     lod.companyIdPackageTest,
+//     lod.patientCompanyId,
+
+//     com.is_pament_required,
+//     p.first_name,
+//     p.email,
+//     p.dateofbirth,
+//     p.phone,
+//     p.parent_id AS patientParentId,
+
+//     /* isFree of the company package (NULL when the item is not a company package) */
+//     (
+//         SELECT MIN(ccp.isFree)
+//         FROM connectedCompaniesLabPackages ccp
+//         WHERE ccp.companyId = lod.companyIdPackageTest
+//           AND ccp.labPackageId = lod.referenceId
+//           AND lod.type = 'Package'
+//     ) AS packageIsFree,
+
+//     /* Check previous successful order */
+//     CASE
+//         WHEN EXISTS (
+//             SELECT 1
+//             FROM labOrders previousOrder
+//             INNER JOIN labOrderDetails previousDetail
+//                 ON previousOrder.id = previousDetail.labOrderId
+//             WHERE 
+//                 previousOrder.patientId = lo.patientId
+
+//                 /* Same company */
+//                 AND previousDetail.patientCompanyId = lod.patientCompanyId
+
+//                 /* Same package/test */
+//                 AND previousDetail.referenceId = lod.referenceId
+
+//                 /* Do not check current order */
+//                 AND previousOrder.id <> lo.id
+
+//                 /* Successful orders only */
+//                 AND previousOrder.orderStatus IN (
+//                     'confirmed',
+//                     'Report Generated',
+//                      'Payment Completed',
+//                      'Completed',
+//                      'Reschedule',
+//                      'Result Awaited'
+
+//                 )
+
+//                 /* Active records only */
+//                 AND previousOrder.isActive = true
+//                 AND previousOrder.isDeleted = false
+//                 AND previousDetail.isActive = true
+//                 AND previousDetail.isDeleted = false
+//         )
+//         THEN 1
+//         ELSE 0
+//     END AS alreadyOrdered
+
+// FROM labOrders lo
+
+// LEFT JOIN labOrderDetails lod 
+//     ON lo.id = lod.labOrderId
+// LEFT JOIN patient p 
+//     ON lo.patientId = p.id
+
+// LEFT JOIN worksman_company_list com 
+//     ON lod.patientCompanyId = com.id
+
+// LEFT JOIN labTestBookingAddress AS labAddress 
+//     ON lo.patientId = labAddress.patientId
+//     AND labAddress.createdAt = (
+//         SELECT MAX(a.createdAt)
+//         FROM labTestBookingAddress a
+//         WHERE a.patientId = lo.patientId
+//     )
+
+// WHERE 
+//     lo.id = :orderId
+//     AND lo.isActive = true
+//     AND lo.isDeleted = false;
+//         `;
+
+//         const results = await sequelizeDB1.query(query, {
+//             replacements: { orderId },
+//             type: QueryTypes.SELECT
+//         });
+        
+//         const orders = results.reduce((acc, row) => {
+//             const {
+//                 id,
+//                 patientId,
+//                 bookingDate,
+//                 bookingTime,
+//                 bookingAddress,
+//                 labId,
+//                 labCityName,
+//                 labBranchId,
+//                 price,
+//                 discountApplied,
+//                 otherCharges,
+//                 totalPrice,
+//                 isPaid,
+//                 orderStatus,
+//                 paymentStatus,
+//                 noOfTest,
+//                 isActive,
+//                 isDeleted,
+//                 createdAt,
+//                 updatedAt,
+//                 detailId,
+//                 labOrderId,
+//                 detailPatientId,
+//                 detailType,
+//                 referenceId,
+//                 name,
+//                 mode,
+//                 detailNoOfTest,
+//                 detailPrice,
+//                 detailDiscount,
+//                 detailTotal,
+//                 detailIsActive,
+//                 detailIsDeleted,
+//                 detailCreatedAt,
+//                 detailUpdatedAt,
+//                 companyIdPackageTest,
+//                 patientCompanyId,
+//                 is_pament_required,
+//                 alreadyOrdered,
+//                 patientParentId,
+//                 packageIsFree,
+//                 state,
+//                 city,
+//                 zip_code,
+
+//                 first_name,
+//                 email,
+//                 dateofbirth,
+//                 phone
+
+//             } = row;
+
+//             let order = acc.find(o => o.id === id);
+//             if (!order) {
+//                 order = {
+//                     id,
+//                     patientId,
+//                     bookingDate,
+//                     bookingTime,
+//                     bookingAddress,
+//                     labId,
+//                     labCityName,
+//                     labBranchId,
+//                     price,
+//                     discountApplied,
+//                     otherCharges,
+//                     totalPrice,
+//                     isPaid,
+//                     state,
+//                     city,
+//                     zip_code,
+//                     first_name,
+//                     email,
+//                     dateofbirth,
+//                     phone,
+//                     orderStatus,
+//                     paymentStatus,
+//                     noOfTest,
+//                     isActive,
+//                     isDeleted,
+//                     createdAt,
+//                     updatedAt,
+//                     orderDetails: []
+//                 };
+//                 acc.push(order);
+//             }
             
          
-            if (detailId) {       
+//             if (detailId) {       
 
-                order.orderDetails.push({
-                    id: detailId,
-                    labOrderId,
-                    patientId: detailPatientId,
-                    type: detailType,
-                    referenceId,
-                    name,
-                    mode,
-                    noOfTest: detailNoOfTest,
-                    price: detailPrice,
-                    discount: detailDiscount,
-                    total: detailTotal,
-                    isActive: detailIsActive,
-                    isDeleted: detailIsDeleted,
-                    createdAt: detailCreatedAt,
-                    updatedAt: detailUpdatedAt,                  
-                   // isFree : is_pament_required === 1 ? 0 : companyIdPackageTest === patientCompanyId ? alreadyOrdered === 1 ? 0 : 1  : 0
-                   // dependents (patient.parent_id > 0) always pay, even for the company's assigned package
-                   // company package with isFree = 0 is always paid; isFree = 1 keeps the existing checks
-                   isFree: packageIsFree !== null && Number(packageIsFree) === 0 ? 0 : Number(patientParentId) > 0 ? 0 : is_pament_required === 1 ? 0 : alreadyOrdered === 1 ? 0 : companyIdPackageTest === patientCompanyId ? 1 : 0
+//                 order.orderDetails.push({
+//                     id: detailId,
+//                     labOrderId,
+//                     patientId: detailPatientId,
+//                     type: detailType,
+//                     referenceId,
+//                     name,
+//                     mode,
+//                     noOfTest: detailNoOfTest,
+//                     price: detailPrice,
+//                     discount: detailDiscount,
+//                     total: detailTotal,
+//                     isActive: detailIsActive,
+//                     isDeleted: detailIsDeleted,
+//                     createdAt: detailCreatedAt,
+//                     updatedAt: detailUpdatedAt,                  
+//                    // isFree : is_pament_required === 1 ? 0 : companyIdPackageTest === patientCompanyId ? alreadyOrdered === 1 ? 0 : 1  : 0
+//                    // dependents (patient.parent_id > 0) always pay, even for the company's assigned package
+//                    // company package with isFree = 0 is always paid; isFree = 1 keeps the existing checks
+//                    isFree: packageIsFree !== null && Number(packageIsFree) === 0 ? 0 : Number(patientParentId) > 0 ? 0 : is_pament_required === 1 ? 0 : alreadyOrdered === 1 ? 0 : companyIdPackageTest === patientCompanyId ? 1 : 0
 
-                });                
-            }
+//                 });                
+//             }
 
-            return acc;
-        }, []);
+//             return acc;
+//         }, []);
 
-        return orders;
-    }
+//         return orders;
+//     }
 
     // options.cancelledBy: who cancelled (shown in the care navigator cancellation email)
     static async updateLabOrder(orderId, updateData, response, options = {}) {

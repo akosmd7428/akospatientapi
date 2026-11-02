@@ -1560,6 +1560,78 @@ class PatientService {
             replacements: { ...replacements, limit: COMPANY_PATIENT_LOOKUP_LIMIT }
         });
     }
+
+    // create a patient of a company for the ohc backend, same rows as the sso login (patient + connectedCompaniesPatient login row),
+    // returns { patient } or { error: 'company_not_found' | 'email_exists', patientId }
+    static async createOhcPatient({ company_id, email, phone, date_of_birth, gender, first_name, last_name }) {
+        const [company] = await sequelizeDB1.query(
+            'SELECT id FROM worksman_company_list WHERE id = :company_id AND active = 1 LIMIT 1',
+            { replacements: { company_id }, type: QueryTypes.SELECT }
+        );
+        if (!company) {
+            return { error: 'company_not_found' };
+        }
+
+        const existing = await Patient.findOne({ where: { email }, attributes: ['id'] });
+        if (existing) {
+            return { error: 'email_exists', patientId: existing.id };
+        }
+
+        // there is no password to log in with, the patient can set one with forgot password
+        const hash_password = crypto.createHash('md5').update(crypto.randomUUID()).digest('hex');
+        const uniquePatientId = String(crypto.randomInt(100000, 1000000));
+
+        const transaction = await sequelizeDB1.transaction();
+        try {
+            const [patientId] = await sequelizeDB1.query(`
+                INSERT INTO patient SET
+                    uuid = :uuid,
+                    companyId = :company_id,
+                    employer_id = :company_id,
+                    email = :email,
+                    phone = :phone,
+                    first_name = :first_name,
+                    last_name = :last_name,
+                    dateofbirth = :date_of_birth,
+                    gender = :gender,
+                    role = 'Patient',
+                    password = :hash_password,
+                    uniquePatientId = :uniquePatientId
+            `, {
+                type: QueryTypes.INSERT,
+                replacements: { uuid: crypto.randomUUID(), company_id, email, phone, first_name, last_name, date_of_birth, gender, hash_password, uniquePatientId },
+                transaction
+            });
+
+            await sequelizeDB1.query(`
+                INSERT INTO connectedCompaniesPatient SET
+                    connectionType = 1,
+                    companyId = :company_id,
+                    patientId = :patientId,
+                    patientEmail = :email,
+                    mobile_no = :phone,
+                    first_name = :first_name,
+                    password = :hash_password,
+                    uniquePatientId = :uniquePatientId,
+                    status = 1,
+                    isActive = 1
+            `, {
+                type: QueryTypes.INSERT,
+                replacements: { company_id, patientId, email, phone, first_name, hash_password, uniquePatientId },
+                transaction
+            });
+
+            await transaction.commit();
+            return { patient: { id: patientId, uniquePatientId, email, first_name, last_name, companyId: company.id } };
+        } catch (error) {
+            await transaction.rollback();
+            // the same email created by a parallel request, patient.email is unique
+            if (error.name === 'SequelizeUniqueConstraintError' || (error.original && error.original.code === 'ER_DUP_ENTRY')) {
+                return { error: 'email_exists' };
+            }
+            throw error;
+        }
+    }
 }
 
 module.exports = PatientService;
