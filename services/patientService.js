@@ -1544,15 +1544,32 @@ class PatientService {
                 employer_id: companyId,
             });
             if (dependant.member_id) {
-                // member_id is not in the Patient model yet, written directly so the other patient queries are not affected
-                await sequelizeDB1.query('UPDATE patient SET member_id = :member_id WHERE id = :id', {
-                    type: QueryTypes.UPDATE,
-                    replacements: { member_id: String(dependant.member_id), id: created.id }
-                });
+                await PatientService.setPatientMemberId(created.id, dependant.member_id);
             }
             createdIds.push(created.id);
         }
         return createdIds;
+    }
+    // store the member_id sent by the sso client on the patient, member_id is not in the Patient model yet so it is
+    // written directly and the other patient queries are not affected, nothing is written when it is already the same
+    static async setPatientMemberId(patientId, memberId) {
+        const member_id = String(memberId ?? '').trim();
+        if (!member_id) {
+            return;
+        }
+        await sequelizeDB1.query('UPDATE patient SET member_id = :member_id WHERE id = :id AND (member_id IS NULL OR member_id <> :member_id)', {
+            type: QueryTypes.UPDATE,
+            replacements: { member_id, id: Number(patientId) }
+        });
+    }
+    // the patient with this member_id when it is the logged in patient or one of its dependants (parent_id), null otherwise,
+    // member_id is not in the Patient model yet so it is read directly
+    static async findMemberOfPatient(patientId, memberId) {
+        const rows = await sequelizeDB1.query(
+            'SELECT id FROM patient WHERE member_id = :member_id AND (id = :patient_id OR parent_id = :patient_id) LIMIT 1',
+            { type: QueryTypes.SELECT, replacements: { member_id: String(memberId), patient_id: Number(patientId) } }
+        );
+        return rows[0] ? Patient.findOne({ where: { id: rows[0].id } }) : null;
     }
     // create patient for the sso client login (no email verification, identity is trusted by the client)
     static async createSsoPatient(first_name, last_name, email, mobile, company_id, uuid, hash_password){

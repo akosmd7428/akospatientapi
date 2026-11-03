@@ -90,4 +90,17 @@ const ssoVerifyCodeSchema = Joi.object({
   code: Joi.string().hex().length(64).required(),
 });
 
-module.exports = { registerSchema, loginSchema, loginPatientSchema,preEmpAddSchema,externalSignupSchema,ssoClientLoginSchema,ssoGenerateCodeSchema,ssoVerifyCodeSchema };
+// open a patient frontend page (deeplink) for a member of the logged in patient, the member details are returned with the url
+const ssoDeeplinkSchema = Joi.object({
+  member_id: Joi.string().trim().max(50).required(),
+  first_name: Joi.string().trim().max(100).allow('', null).optional(),
+  last_name: Joi.string().trim().max(100).allow('', null).optional(),
+  mobile: Joi.string().trim().max(20).allow('', null).optional(),
+  email: Joi.string().trim().email().allow('', null).optional(),
+  gender: Joi.string().trim().max(20).allow('', null).optional(),
+  dob: Joi.string().trim().max(20).allow('', null).optional(),
+  deeplink: Joi.string().trim().max(500).allow('', null).optional(),
+  planId: Joi.string().trim().max(50).allow('', null).optional(),
+});
+
+module.exports = { registerSchema, loginSchema, loginPatientSchema,preEmpAddSchema,externalSignupSchema,ssoClientLoginSchema,ssoGenerateCodeSchema,ssoVerifyCodeSchema,ssoDeeplinkSchema };

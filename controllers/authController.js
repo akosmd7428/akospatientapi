@@ -3,7 +3,7 @@ const Patient = require('../models/patientModel');
 const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient');
 const SsoLoginCode = require('../models/ssoLoginCode');
 const { messages } = require('../config/language');
-const { STATUS_CODE, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH } = require('../config/constant');
+const { STATUS_CODE, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH, SSO_DEEPLINK_PAGES } = require('../config/constant');
 const CommonHelper = require('../helpers/commonHelper');
 const { laravelDecrypt } = require('../helpers/laravelCrypt');
 const PatientService = require('../services/patientService');
@@ -174,6 +174,11 @@ class AuthController {
       return { error: { statusCode: STATUS_CODE.HTTP_404_NOT_FOUND, message: "No patient found with the provided email." } };
     }
 
+    // the client's member_id is kept on the patient (new or existing), /sso-deeplink finds the member by it
+    if (req.body.member_id) {
+      await PatientService.setPatientMemberId(patient.id, req.body.member_id);
+    }
+
     // dependants are created as family members of the patient, a failure here is logged and does not stop the login
     if (Array.isArray(req.body.dependants) && req.body.dependants.length > 0) {
       try {
@@ -224,6 +229,59 @@ class AuthController {
         return CommonHelper.sendErrorUnencrypt(res, error.statusCode, error.message);
       }
       return await AuthController.ssoLoginResponse(res, patient, { redirect_url });
+    } catch (error) {
+      AuthController.logAuthError(error, req);
+      return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+    }
+  }
+
+  // frontend url for the sso deeplink (client_talk_to_doctor, client_lab_test, ...), the dashboard when no deeplink
+  // is sent, null for an unknown deeplink
+  static getSsoDeeplinkUrl(deeplink) {
+    const baseUrl = String(PATIENT_FRONTEND_URL || '').replace(/\/+$/, '');
+    const value = String(deeplink || '').trim().toLowerCase();
+    if (!value) {
+      return `${baseUrl}${SSO_DEFAULT_REDIRECT_PATH}`;
+    }
+    const path = Object.prototype.hasOwnProperty.call(SSO_DEEPLINK_PAGES, value) ? SSO_DEEPLINK_PAGES[value] : null;
+    return path ? `${baseUrl}${path}` : null;
+  }
+
+  // the login token (jwtAuth) is verified first, then the member_id is looked up in the patient table and has to be
+  // the logged in patient or one of its dependants, the frontend url for the deeplink is returned with the member details,
+  // planId is added to the url as plan_id
+  static async ssoDeeplink(req, res, next) {
+    try {
+      console.log("deep");
+      const { member_id, first_name, last_name, mobile, email, gender, dob, deeplink, planId } = req.body;
+
+      const member = await PatientService.findMemberOfPatient(req.user.id, member_id);
+      if (!member) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_403_FORBIDDEN, messages.sso_member_not_found);
+      }
+
+      const pageUrl = AuthController.getSsoDeeplinkUrl(deeplink);
+      if (pageUrl === null) {
+        const allowedPages = Object.keys(SSO_DEEPLINK_PAGES).join(', ');
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, `Invalid deeplink, allowed values: ${allowedPages}`);
+      }
+
+      const redirect_url = planId ? `${pageUrl}?plan_id=${encodeURIComponent(planId)}` : pageUrl;
+      return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.sso_deeplink_success, {
+        redirect_url,
+        deeplink,
+        member: {
+          patient_id: member.id,
+          member_id,
+          first_name: first_name || member.first_name,
+          last_name: last_name || member.last_name,
+          mobile: mobile || member.phone,
+          email: email || member.email,
+          gender: gender || member.gender,
+          dob: dob || member.dateofbirth,
+        },
+        planId: planId || null,
+      });
     } catch (error) {
       AuthController.logAuthError(error, req);
       return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);

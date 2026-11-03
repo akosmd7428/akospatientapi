@@ -1,7 +1,8 @@
 const express = require('express');
 const AuthController = require('../controllers/authController');
 const validateSchema = require('../middleware/validateSchema');
-const { loginSchema, externalSignupSchema, ssoClientLoginSchema, ssoGenerateCodeSchema, ssoVerifyCodeSchema} = require('../validation/authValidation');
+const { loginSchema, externalSignupSchema, ssoClientLoginSchema, ssoGenerateCodeSchema, ssoVerifyCodeSchema, ssoDeeplinkSchema} = require('../validation/authValidation');
+const jwtAuth = require('../middleware/jwtAuth');
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
 const syncApiKeyAuth = require('../middleware/syncApiKeyAuth');
 const clientAuth = require('../middleware/clientAuth');
@@ -23,6 +24,7 @@ const ssoGenerateCodeAuth = (req, res, next) => {
 router.post('/login',validateSchema(loginSchema), AuthController.login);
 router.post('/sso-client-login', clientAuth, validateSchema(ssoClientLoginSchema), AuthController.ssoClientLogin);
 router.post('/sso-generate-code', ssoGenerateCodeAuth, validateDataEncryption(), validateSchema(ssoGenerateCodeSchema), AuthController.ssoGenerateCode);
+router.post('/sso-deeplink',clientAuth, jwtAuth, validateSchema(ssoDeeplinkSchema), AuthController.ssoDeeplink);
 router.post('/sso-verify-code',validateDataEncryption(),validateSchema(ssoVerifyCodeSchema), AuthController.ssoVerifyCode);
 router.post('/external-signup',validateDataEncryption(),validateSchema(externalSignupSchema),AuthController.createUserBeforeEmailValidation);
 router.get('/verify-email-token',validateDataEncryption(),AuthController.verifyEmailPatient);

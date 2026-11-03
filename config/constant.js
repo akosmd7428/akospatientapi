@@ -24,4 +24,13 @@ const SSO_REDIRECT_PAGES = {
 // opened when no redirect_page is sent
 const SSO_DEFAULT_REDIRECT_PATH = '/dashboard';
 
-module.exports = { STATUS_CODE, BEHAVIOURAL_HEALTH, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH };
+// sso deeplink values and the patient frontend path they open (the base url is PATIENT_FRONTEND_URL),
+// compared lower case without surrounding spaces
+const SSO_DEEPLINK_PAGES = {
+    client_talk_to_doctor: '/TalkToDoctor',
+    client_lab_test: '/LabTests',
+    client_book_appointment: '/MyAppointments/book',
+    client_pharmacy_avail: '/MyMedicine',
+};
+
+module.exports = { STATUS_CODE, BEHAVIOURAL_HEALTH, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH, SSO_DEEPLINK_PAGES };
