@@ -36,6 +36,19 @@ class AppointmentService {
         }
     }
 
+    // a verified (Paid) appointment call payment of the patient for this date and time
+    static async hasPaidAppointmentPayment(patientId, date, time) {
+        if (!date || !time) return false;
+        const [row] = await sequelizeDB1.query(
+            `SELECT id FROM payment_for_call
+             WHERE patient_id = :patientId AND call_type = 2 AND payment_status = 'Paid'
+                AND call_date = :date AND call_time = :time
+             LIMIT 1`,
+            { replacements: { patientId, date: String(date), time: String(time) }, type: QueryTypes.SELECT }
+        );
+        return !!row;
+    }
+
     static async checkAppointment(patientId, doctorId, date, time,is_paid) {
         // Check if an appointment already exists with the same date, time, and doctor
         const existingAppointment = await Appointment.findOne({
@@ -375,7 +388,7 @@ class AppointmentService {
             );
             const appointment = await Appointment.findOne({ where: { id: appointmentId } });
             const patient = await Patient.findOne({ where: { id: appointment.patientId } });
-            console.log(patient,'patient');
+            // console.log(patient,'patient');
             
             // Prepare dynamic content for SMS
             const patientName = patient.first_name +' '+patient.last_name;

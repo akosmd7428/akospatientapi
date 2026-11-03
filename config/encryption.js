@@ -2,16 +2,16 @@
 const crypto = require('crypto');
 const { DATA_ENCRYPTION_KEY, DATA_ENCRYPTION_IV, ALGORITHM } = require('./secret');
 // Define the encryption method and key
-const algorithm = ALGORITHM; // AES-256 requires a 32-byte key
+const algorithm = ALGORITHM || 'aes-256-cbc'; // AES-256 requires a 32-byte key, the default matches the frontends
 const key = DATA_ENCRYPTION_KEY; // 32 characters, from .env
 const iv = DATA_ENCRYPTION_IV; // 16 bytes as hex, from .env
 const ivBuffer = Buffer.from(iv, 'hex');
-console.log('algo',algorithm);
-console.log('key',key);
-console.log('iv',iv);
+// console.log('algo',algorithm);
+// console.log('key',key);
+// console.log('iv',iv);
 // Function to encrypt data
 function encryptData(plaintext) {
-    console.log(plaintext);
+   // console.log(plaintext);
     try{ 
         if (key.length !== 32) {
             throw new Error('AES-256 requires a 32-byte key');
@@ -23,7 +23,7 @@ function encryptData(plaintext) {
         const cipher = crypto.createCipheriv(algorithm, key, ivBuffer);
         let encrypted = cipher.update(plaintext, 'utf8', 'hex');
         encrypted += cipher.final('hex');
-        console.log("after",encrypted);
+       // console.log("after",encrypted);
         return { IV: ivBuffer.toString('hex'), encryptedData: encrypted }; // Return IV and encrypted data
     }catch(error){
         console.log(error.message)

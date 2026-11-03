@@ -171,6 +171,12 @@ class labTestService {
         for (const field of LAB_ORDER_FIELDS) {
             if (body[field] !== undefined) orderData[field] = body[field];
         }
+        // lab of the order, sub-city orders are priced without a lab
+        const isSubCityOrder = orderData.subCityId !== undefined && orderData.subCityId !== null && orderData.subCityId !== '';
+        const orderLabId = isSubCityOrder || !orderData.labId ? null : Number(orderData.labId);
+        if (orderLabId !== null && !Number.isInteger(orderLabId)) {
+            throw httpError(400, 'Invalid lab');
+        }
 
         const orderDetails = [];
         for (const detail of details) {
@@ -195,10 +201,18 @@ class labTestService {
             if (!Number.isFinite(price) || !Number.isFinite(discount) || price < 0 || discount < 0 || discount > price) {
                 throw httpError(400, 'Invalid item price');
             }
+            // the item lab must be the order lab
+            const itemLabId = detail.labId === undefined || detail.labId === null || detail.labId === '' ? null : Number(detail.labId);
+            if (orderLabId !== null && itemLabId !== null && itemLabId !== orderLabId) {
+                throw httpError(400, 'Invalid order item');
+            }
             // the price / discount pair must be one the lab price list offers for this item
+            // (of the order lab, sub-city orders have no lab)
+            const catalogLabId = orderLabId;
             const catalog = await sequelizeDB1.query(
-                'SELECT price, discount FROM connectedLabs WHERE referenceId = :referenceId AND type = :type AND mode = :mode AND isActive = 1',
-                { replacements: { referenceId: cartItem.referenceId, type, mode }, type: QueryTypes.SELECT }
+                'SELECT price, discount FROM connectedLabs WHERE referenceId = :referenceId AND type = :type AND mode = :mode AND isActive = 1'
+                    + (catalogLabId !== null ? ' AND labId = :labId' : ''),
+                { replacements: { referenceId: cartItem.referenceId, type, mode, labId: catalogLabId }, type: QueryTypes.SELECT }
             );
             const listed = catalog.some(row => Math.abs(Number(row.price || 0) - price) < 0.01 && Math.abs(Number(row.discount || 0) - discount) < 0.01);
             if (!listed && (price > 0 || discount > 0 || await this.isPaymentRequired(patientCompanyId))) {

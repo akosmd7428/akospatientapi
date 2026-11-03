@@ -35,11 +35,14 @@ const ChatController = {
             if(type == 1 && req.user.role === 'careNavigator'){ //patient, only care navigators search patients of their companies
                 list = await ChatService.chat(type, search,careCompanyIds);
             }
+            // doctors and care navigators are limited to the ones the caller can chat with
             if(type == 2){ //Doctor
-                list = await ChatService.chat(type, search,careCompanyIds);
+                // list = await ChatService.chat(type, search,careCompanyIds);
+                list = await ChatService.chat(type, search,careCompanyIds, chatIdentity(req));
             }
             if(type == 3){ //careNavigator
-                list = await ChatService.chat(type, search,careCompanyIds);
+                // list = await ChatService.chat(type, search,careCompanyIds);
+                list = await ChatService.chat(type, search,careCompanyIds, chatIdentity(req));
             }
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { list  });
         } catch (error) {
@@ -53,6 +56,10 @@ const ChatController = {
 
         try {
             const me = chatIdentity(req);
+            // same limits as the socket sendMessage
+            if ((message !== undefined && message !== null && String(message).length > 5000) || !ChatService.isValidMessageType(messageType)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Invalid message");
+            }
             if (!await ChatService.canChat(me.id, me.userType, receiverId, receiverType, req.careCompanyIds)) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, "Access denied");
             }
@@ -94,6 +101,11 @@ const ChatController = {
             const type = toPositiveInt(userType);
             if (!id || !type) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Invalid user");
+            }
+            // only users the caller can chat with, everyone else reads as offline
+            const me = chatIdentity(req);
+            if (!await ChatService.canChat(me.id, me.userType, id, type, req.careCompanyIds)) {
+                return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { userStatus: { userId: id, userType: type, isOnline: false, lastActive: null } });
             }
             const userStatus = await ChatService.getUserStatus(id, type);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, {userStatus});

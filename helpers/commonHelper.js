@@ -1,4 +1,5 @@
 const { encryptData,decryptData } = require('../config/encryption');
+const jwt = require('jsonwebtoken'); // used by generateVerificationLink
 class CommonHelper {
     // 5xx details (sql errors, stack messages) are logged on the server and never sent to the client
     static safeErrors(statusCode, errors) {

@@ -49,11 +49,30 @@ app.use((req, res, next) => {
   next();
 });
 
+// login, otp and code endpoints never carry files, a small body limit stops large payload abuse before auth
+const AUTH_PATHS = [
+  '/api/auth/login',
+  '/api/patient/details',
+  '/api/auth/verify-email-token',
+  '/api/auth/sso-client-login',
+  '/api/auth/sso-verify-code',
+  '/api/auth/external-signup',
+  '/api/forgot-password',
+  '/api/connect-access/verify-code',
+  '/api/careNavigator/login',
+  '/api/labs/verify-call-coupon',
+];
+app.use(AUTH_PATHS, express.json({ limit: '100kb' }));
+app.use(AUTH_PATHS, express.urlencoded({ limit: '100kb', extended: true }));
+
 app.use(express.json({ limit: '50mb' })); // base64 uploads go through json bodies
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // allowed browser origins, comma separated in CORS_ORIGINS
-const DEFAULT_CORS_ORIGINS = 'https://carenavigator.akosmd.in,https://360.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
+// localhost origins are only allowed outside production
+const DEFAULT_CORS_ORIGINS = process.env.NODE_ENV === 'production'
+  ? 'https://carenavigator.akosmd.in,https://360.akosmd.in'
+  : 'https://carenavigator.akosmd.in,https://360.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
 const corsOptions = {
   origin: (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim()).filter(Boolean),
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
@@ -82,18 +101,7 @@ const authLimiter = rateLimit({
 
 // Apply to all API routes
 app.use('/api', apiLimiter);
-app.use([
-  '/api/auth/login',
-  '/api/patient/details',
-  '/api/auth/verify-email-token',
-  '/api/auth/sso-client-login',
-  '/api/auth/sso-verify-code',
-  '/api/auth/external-signup',
-  '/api/forgot-password',
-  '/api/connect-access/verify-code',
-  '/api/careNavigator/login',
-  '/api/labs/verify-call-coupon',
-], authLimiter);
+app.use(AUTH_PATHS, authLimiter);
 
 // Apply route logger middleware to log all API route accesses
 app.use(routeLogger);

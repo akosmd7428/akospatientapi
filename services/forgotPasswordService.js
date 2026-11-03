@@ -38,23 +38,25 @@ class ForgotPasswordService {
     if (account && canSendOtp(email)) {
       const otp = generateOtp(email, role);
       const { subject, html } = EmailTemplates.otpCode({ otp });
-      await emailHelperSMTP(email, email, subject, html);
+      // not awaited, a slower answer for registered emails would reveal which accounts exist
+      emailHelperSMTP(email, email, subject, html).catch((error) => console.error('otp email failed', error.message));
     }
     return OTP_SENT;
   }
 
 
-  static async verifyOtp(email, otp) {
-    const isValid = validateOtp(email, otp);
-    if (!isValid) {
+  // returns the one time reset token, change-password must come from the same client
+  static async verifyOtp(email, otp, clientIp = null) {
+    const resetToken = validateOtp(email, otp, clientIp);
+    if (!resetToken) {
       throw clientError(messages.invalidOtp);
     }
-    return messages.otpVerified;
+    return { message: messages.otpVerified, resetToken };
   }
 
   // forgot password: only allowed right after the otp of this email was verified, for the role the otp was sent for
-  static async resetPassword(email, newPassword) {
-    const verified = consumeVerifiedOtp(email);
+  static async resetPassword(email, newPassword, client = {}) {
+    const verified = consumeVerifiedOtp(email, client);
     if (!verified) {
       throw clientError(messages.invalidOtp);
     }
@@ -63,6 +65,10 @@ class ForgotPasswordService {
 
   // logged in user: the email always comes from the caller's own account, never from the request
   static async changeOwnPassword(user, newPassword) {
+    // a care navigator acting as the patient (impersonation token) can never take over the patient's password
+    if (user.act) {
+      throw clientError("Password can only be changed by the account owner");
+    }
     const models = { patient: Patient, careNavigator: CareNavigator, hr: Hr };
     const model = models[user.role];
     const account = model ? await model.findOne({ where: { id: user.id } }) : null;

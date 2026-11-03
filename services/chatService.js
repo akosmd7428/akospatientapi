@@ -18,6 +18,11 @@ const toPositiveInt = (value) => {
     return Number.isInteger(id) && id > 0 ? id : null;
 };
 
+// messageType values stored in chats, 1=text, 2=file (empty is kept for older clients)
+const MESSAGE_TYPES = [1, 2];
+const isValidMessageType = (value) => value === undefined || value === null || value === ''
+    || MESSAGE_TYPES.includes(Number(value));
+
 class ChatService {
     // Initiate a chat session
     static async initiateChat(senderId, receiverId, message) {
@@ -30,8 +35,14 @@ class ChatService {
     }
 
 
-    static async chat(type, search,careCompanyIds) {    
+    // caller ({ id, userType }) limits doctors and care navigators to the ones the caller can chat with
+    static async chat(type, search,careCompanyIds, caller) {
         let list = [];
+        let allowedIds = null;
+        if (caller && (type == 2 || type == 3)) {
+            allowedIds = await this.getChatPartnerIds(caller.id, caller.userType, Number(type), careCompanyIds);
+            if (!allowedIds.length) return list;
+        }
         if(type == 1){
             let query = `
                 SELECT 
@@ -61,7 +72,8 @@ class ChatService {
                 where: {
                     name: {
                         [Op.like]: `%${search || ''}%`
-                    }
+                    },
+                    ...(allowedIds ? { id: { [Op.in]: allowedIds } } : {})
                 },
                 attributes: [
                     ['id', 'chatPartnerId'], 
@@ -77,7 +89,8 @@ class ChatService {
                 where: {
                     name: {
                         [Op.like]: `%${search || ''}%`
-                    }
+                    },
+                    ...(allowedIds ? { id: { [Op.in]: allowedIds } } : {})
                 },
                 attributes: [
                     ['id', 'chatPartnerId'], 
@@ -283,11 +296,12 @@ class ChatService {
                     ]
                 },
                 attributes: [
-                    [sequelizeDB1.literal(`IF(senderId = ${userId} AND senderType = ${userType}, receiverId, senderId)`), 'chatPartnerId'],
-                    [sequelizeDB1.literal(`IF(senderId = ${userId} AND senderType = ${userType}, receiverType, senderType)`), 'chatPartnerType'],
-                    [sequelizeDB1.literal(`SUM(IF(isRead = 0 AND receiverId = ${userId} AND receiverType = ${userType}, 1, 0))`), 'unreadMessages'],
+                    [sequelizeDB1.literal('IF(senderId = :userId AND senderType = :userType, receiverId, senderId)'), 'chatPartnerId'],
+                    [sequelizeDB1.literal('IF(senderId = :userId AND senderType = :userType, receiverType, senderType)'), 'chatPartnerType'],
+                    [sequelizeDB1.literal('SUM(IF(isRead = 0 AND receiverId = :userId AND receiverType = :userType, 1, 0))'), 'unreadMessages'],
                 ],
                 group: ['chatPartnerId', 'chatPartnerType'],
+                replacements: { userId, userType },
                 raw: true
             });
     
@@ -577,6 +591,80 @@ class ChatService {
         return !!row;
     }
 
+    // companies a doctor serves (doctor_employer.employer_id is the company id)
+    static async getDoctorCompanyIds(doctorId) {
+        const rows = await sequelizeDB1.query(
+            'SELECT DISTINCT employer_id AS companyId FROM doctor_employer WHERE doctor_id = :doctorId',
+            { replacements: { doctorId }, type: QueryTypes.SELECT }
+        );
+        return rows.map(row => Number(row.companyId)).filter(id => id > 0);
+    }
+
+    static async isDoctorInCompanies(doctorId, companyIds) {
+        if (!companyIds || !companyIds.length) return false;
+        const [row] = await sequelizeDB1.query(
+            'SELECT 1 AS found FROM doctor_employer WHERE doctor_id = :doctorId AND employer_id IN (:companyIds) LIMIT 1',
+            { replacements: { doctorId, companyIds }, type: QueryTypes.SELECT }
+        );
+        return !!row;
+    }
+
+    // active care navigators managing one of the companies
+    static async getCareNavigatorIdsForCompanies(companyIds) {
+        if (!companyIds || !companyIds.length) return [];
+        const rows = await sequelizeDB1.query(
+            'SELECT id, companyId, isActive FROM carenavigator',
+            { type: QueryTypes.SELECT }
+        );
+        return rows
+            .filter(row => row.isActive != 0 && parseCompanyIds(row.companyId).some(id => companyIds.includes(id)))
+            .map(row => Number(row.id));
+    }
+
+    // ids of the doctors (partnerType 2) or care navigators (partnerType 3) the caller can chat with, same rules as canChat
+    static async getChatPartnerIds(callerId, callerType, partnerType, careCompanyIds) {
+        if (callerType === partnerType) return [];
+        if (partnerType === USER_TYPE.DOCTOR) {
+            if (callerType === USER_TYPE.PATIENT) {
+                const rows = await sequelizeDB1.query(
+                    `SELECT doctorId FROM appointments WHERE patientId = :patientId
+                     UNION
+                     SELECT cp.doctor_id AS doctorId FROM connect_waiting_room cwr
+                     JOIN connect_provider cp ON cp.id = cwr.pcp_doctor_id
+                     WHERE cwr.patient_id = :patientId`,
+                    { replacements: { patientId: callerId }, type: QueryTypes.SELECT }
+                );
+                return rows.map(row => Number(row.doctorId)).filter(id => id > 0);
+            }
+            if (callerType === USER_TYPE.CARE_NAVIGATOR) {
+                const companyIds = careCompanyIds || await this.getCareNavigatorCompanyIds(callerId);
+                if (!companyIds.length) return [];
+                const rows = await sequelizeDB1.query(
+                    'SELECT DISTINCT doctor_id AS doctorId FROM doctor_employer WHERE employer_id IN (:companyIds)',
+                    { replacements: { companyIds }, type: QueryTypes.SELECT }
+                );
+                return rows.map(row => Number(row.doctorId)).filter(id => id > 0);
+            }
+            return [];
+        }
+        if (partnerType === USER_TYPE.CARE_NAVIGATOR) {
+            if (callerType === USER_TYPE.PATIENT) {
+                const [patient] = await sequelizeDB1.query(
+                    'SELECT employer_id, companyId FROM patient WHERE id = :patientId LIMIT 1',
+                    { replacements: { patientId: callerId }, type: QueryTypes.SELECT }
+                );
+                if (!patient) return [];
+                const companyIds = [toPositiveInt(patient.employer_id), toPositiveInt(patient.companyId)].filter(Boolean);
+                return this.getCareNavigatorIdsForCompanies(companyIds);
+            }
+            if (callerType === USER_TYPE.DOCTOR) {
+                return this.getCareNavigatorIdsForCompanies(await this.getDoctorCompanyIds(callerId));
+            }
+            return [];
+        }
+        return [];
+    }
+
     // whether the sender (identity from the token) may chat with the receiver.
     // careCompanyIds is only used for care navigator senders, loaded from the database when not given
     static async canChat(senderId, senderType, receiverId, receiverType, careCompanyIds) {
@@ -600,8 +688,14 @@ class ChatService {
             const doctorId = senderType === USER_TYPE.DOCTOR ? senderId : receiverId;
             return this.isPatientRelatedToDoctor(patientId, doctorId);
         }
-        // doctor - care navigator
-        return true;
+        // doctor - care navigator, only when the doctor serves one of the navigator's companies
+        // return true;
+        const doctorId = senderType === USER_TYPE.DOCTOR ? senderId : receiverId;
+        const careNavigatorId = senderType === USER_TYPE.CARE_NAVIGATOR ? senderId : receiverId;
+        const companyIds = senderType === USER_TYPE.CARE_NAVIGATOR && careCompanyIds
+            ? careCompanyIds
+            : await this.getCareNavigatorCompanyIds(careNavigatorId);
+        return this.isDoctorInCompanies(doctorId, companyIds);
     }
 
     // update chat room for the particular patient
@@ -632,5 +726,6 @@ class ChatService {
 
 ChatService.USER_TYPE = USER_TYPE;
 ChatService.toPositiveInt = toPositiveInt;
+ChatService.isValidMessageType = isValidMessageType;
 
 module.exports = ChatService;

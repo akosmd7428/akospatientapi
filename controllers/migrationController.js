@@ -3,6 +3,22 @@ const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
 const MigrationService = require('../services/migrationService');
 
+// one sync call may carry at most this many records (top level array, or data/doctors/packages/labs/diagnostics/employees)
+const MAX_MIGRATION_RECORDS = parseInt(process.env.MAX_MIGRATION_RECORDS, 10) || 5000;
+const RECORD_LIST_KEYS = ['data', 'doctors', 'packages', 'labs', 'diagnostics', 'employees'];
+
+const tooManyRecords = (payload) => {
+    if (Array.isArray(payload)) return payload.length > MAX_MIGRATION_RECORDS;
+    if (!payload || typeof payload !== 'object') return false;
+    return RECORD_LIST_KEYS.some(key => Array.isArray(payload[key]) && payload[key].length > MAX_MIGRATION_RECORDS);
+};
+
+const sendTooManyRecords = (res) => CommonHelper.sendErrorUnencrypt(
+    res,
+    STATUS_CODE.HTTP_400_BAD_REQUEST,
+    `Too many records, at most ${MAX_MIGRATION_RECORDS} per request`
+);
+
 class MigrationController {
     static async migrateLabData(req, res) {
         try {
@@ -15,6 +31,7 @@ class MigrationController {
                     'Lab payload is required'
                 );
             }
+            if (tooManyRecords(payload)) return sendTooManyRecords(res);
 
             const result = await MigrationService.migrateLabsPayload(payload);
             console.log('[migrateLabData] summary:', JSON.stringify({
@@ -52,6 +69,7 @@ class MigrationController {
                     'Package payload is required'
                 );
             }
+            if (tooManyRecords(payload)) return sendTooManyRecords(res);
 
             const result = await MigrationService.migratePackagesPayload(payload);
 
@@ -83,6 +101,7 @@ class MigrationController {
                     'Doctor payload is required'
                 );
             }
+            if (tooManyRecords(payload)) return sendTooManyRecords(res);
 
             const result = await MigrationService.migrateDoctorPayload(payload);
 
@@ -114,6 +133,7 @@ class MigrationController {
                     'corporate_name is required in payload'
                 );
             }
+            if (tooManyRecords(payload)) return sendTooManyRecords(res);
 
             const result = await MigrationService.migrateCorporatePayload(payload);
 

@@ -34,3 +34,4 @@ const SSO_DEEPLINK_PAGES = {
 };
 
 module.exports = { STATUS_CODE, BEHAVIOURAL_HEALTH, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH, SSO_DEEPLINK_PAGES };
+module.exports.DEFAULT_PATIENT_PASSWORD = process.env.DEFAULT_PATIENT_PASSWORD || 'Akosmd@123'; // temporary default for hr/migrated patients, must be replaced by a set-password link

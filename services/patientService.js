@@ -436,6 +436,8 @@ class PatientService {
     //     }
     // }
 
+    // unused: nothing calls this any more (profile images come from /data/upload), and it is not safe to call,
+    // the extension and type are written into the file name unchecked and the content type is never validated
     static async saveImage(buffer, extension, type) {
         try {
             if (!buffer) throw new Error("No image data provided");
@@ -597,6 +599,45 @@ class PatientService {
         return !!row;
     }
 
+    // true when the doctor is linked to the patient: on the call (call log doctor, its waiting room provider, or a group call
+    // of one of its groups that no doctor has taken yet), on an appointment, or in the patient's care team (only without a call).
+    // callId limits the check to that call and the call must be this patient's, patientId 0 means any patient on the call
+    static async isDoctorLinkedToPatient(doctor, patientId, callId = null) {
+        const doctorId = parseInt(doctor && doctor.id, 10) || 0;
+        const email = (doctor && doctor.email) || '';
+        const pid = parseInt(patientId, 10) || 0;
+        const cid = callId ? parseInt(callId, 10) : 0;
+        if (!doctorId || Number.isNaN(cid) || (!pid && !cid)) return false;
+
+        const connectIds = `SELECT cp.id FROM connect_provider cp WHERE cp.doctor_id = :doctorId OR (cp.email = :email AND :email <> '')`;
+        const [row] = await sequelizeDB1.query(
+            `SELECT 1 AS found FROM connect_call_log ccl
+             WHERE (:callId = 0 OR ccl.call_id = :callId)
+                AND (:patientId = 0 OR ccl.patient_id = :patientId)
+                AND ccl.doctor_id = :doctorId
+             UNION ALL
+             SELECT 1 AS found FROM connect_waiting_room cwr
+             LEFT JOIN connect_call_log ccl ON ccl.call_id = cwr.call_id
+             WHERE (:callId = 0 OR cwr.call_id = :callId)
+                AND (:patientId = 0 OR cwr.patient_id = :patientId)
+                AND (cwr.pcp_doctor_id IN (${connectIds})
+                    OR (cwr.group_id <> 0 AND (ccl.doctor_id IS NULL OR ccl.doctor_id = 0)
+                        AND cwr.group_id IN (SELECT cpg.group_id FROM connect_provider_groups cpg WHERE cpg.connect_provider_id IN (${connectIds}))))
+             UNION ALL
+             SELECT 1 AS found FROM appointments a
+             LEFT JOIN connect_call_log ccl ON ccl.appointmentId = a.id
+             WHERE a.doctorId = :doctorId
+                AND (:patientId = 0 OR a.patientId = :patientId)
+                AND (:callId = 0 OR ccl.call_id = :callId OR a.callId = :callId)
+             UNION ALL
+             SELECT 1 AS found FROM patientCareTeam pct
+             WHERE :callId = 0 AND pct.patientId = :patientId AND pct.doctorId = :doctorId
+             LIMIT 1`,
+            { replacements: { doctorId, email, patientId: pid, callId: cid }, type: QueryTypes.SELECT }
+        );
+        return !!row;
+    }
+
     static async getProfileByPatientEmail(patientEmail) {
         try {
             return await ConnectedCompaniesPatient.findOne({ where: { patientEmail } });
@@ -630,7 +671,21 @@ class PatientService {
             // a doctor can only write the prescription of its own appointment for that appointment's patient
             if (doctorId && prescriptionDetail.appointmentId) {
                 const appointment = await Appointment.findOne({ where: { id: prescriptionDetail.appointmentId } });
-                if (appointment && (appointment.doctorId != doctorId || appointment.patientId != prescriptionDetail.patientId)) {
+                // if (appointment && (appointment.doctorId != doctorId || appointment.patientId != prescriptionDetail.patientId)) {
+                // the appointment must exist and be this doctor's, the patient always comes from the appointment
+                if (!appointment || appointment.doctorId != doctorId) {
+                    return false;
+                }
+                prescriptionDetail.patientId = appointment.patientId;
+            } else if (doctorId && Number(prescriptionDetail.patientId) !== 0) {
+                // without an appointment the doctor must be linked to the patient (the call, waiting room or care team),
+                // patientId 0 is the general prescription of a patient that is not registered, it is not linked to anyone
+                const linked = await this.isDoctorLinkedToPatient(
+                    { id: doctorId, email: prescriptionDetail.doctorEmail },
+                    prescriptionDetail.patientId,
+                    prescriptionDetail.callId || null
+                );
+                if (!linked) {
                     return false;
                 }
             }
@@ -646,11 +701,16 @@ class PatientService {
             }
             if (prescriptionDetail.patientId !== 0 && prescriptionDetail.appointmentId !== 0) {
                 // When patientId and appointmentId are available
+                const existingWhere = {
+                    patientId: prescriptionDetail.patientId,
+                    appointmentId: prescriptionDetail.appointmentId,
+                };
+                // without an appointment only this doctor's own row is updated, another doctor's row gets a new one instead
+                if (!prescriptionDetail.appointmentId) {
+                    existingWhere.doctorEmail = prescriptionDetail.doctorEmail || '';
+                }
                 const existingPrescription = await PatientPrescriptionDetails.findOne({
-                    where: {
-                        patientId: prescriptionDetail.patientId,
-                        appointmentId: prescriptionDetail.appointmentId,
-                    },
+                    where: existingWhere,
                 });
     
                 if (existingPrescription) {

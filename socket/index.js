@@ -24,7 +24,10 @@ const SOCKET_ROLES = [ROLES.PATIENT, ROLES.DOCTOR, ROLES.CARE_NAVIGATOR, ROLES.H
 const CHAT_ROLES = [ROLES.PATIENT, ROLES.DOCTOR, ROLES.CARE_NAVIGATOR];
 
 // same origins as the express cors config in index.js
-const DEFAULT_CORS_ORIGINS = 'https://carenavigator.akosmd.in,https://360.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
+// localhost origins are only allowed outside production
+const DEFAULT_CORS_ORIGINS = process.env.NODE_ENV === 'production'
+  ? 'https://carenavigator.akosmd.in,https://360.akosmd.in'
+  : 'https://carenavigator.akosmd.in,https://360.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim()).filter(Boolean);
 
 const DENIED = { success: false, error: 'Access denied' };
@@ -34,6 +37,15 @@ const FAILED = { success: false, error: 'Something went wrong' };
 // personal room of a logged in user, every socket of that user joins it on connect
 const userRoom = (role, id) => `user:${role}:${id}`;
 const DOCTORS_ROOM = 'doctors';
+// room of one connect_provider id, every socket of the doctor owning it joins on connect
+const connectRoom = (connectDocId) => `connect:${connectDocId}`;
+
+// chat abuse limits
+const MAX_MESSAGE_LENGTH = 5000;
+const MESSAGE_RATE_LIMIT = 20;
+const MESSAGE_RATE_WINDOW_MS = 10 * 1000;
+// longest delay setTimeout accepts, longer token lifetimes are re-checked
+const MAX_TIMER_MS = 2147483647;
 const chatRoom = (aId, aType, bId, bType) => `${aId}_${aType}_${bId}_${bType}`;
 
 // connect_provider ids of a doctor, doctorportalapi links them by doctor id or by the login email
@@ -74,6 +86,8 @@ const io = socket(httpServer, {
     const origin = req.headers.origin;
     callback(null, !origin || CORS_ORIGINS.includes(origin));
   },
+  // events only carry text and ids, chat files go through the http upload
+  maxHttpBufferSize: 1e5,
 });
 
 // every socket must present a login token: io(url, { auth: { token } })
@@ -84,6 +98,7 @@ io.use((socket, next) => {
     return next(new Error('unauthorized'));
   }
   socket.data.user = { id, role: decoded.role, userType: ROLE_USER_TYPE[decoded.role] || null, email: decoded.email };
+  socket.data.tokenExp = Number(decoded.exp) || null;
   next();
 });
 
@@ -92,7 +107,31 @@ io.on("connection", (socket) => {
   socket.join(userRoom(me.role, me.id));
   if (me.role === ROLES.DOCTOR) {
     socket.join(DOCTORS_ROOM);
+    // call events only go to the doctor's own connect provider rooms
+    getDoctorConnectIds(me)
+      .then(ids => ids.forEach(connectId => socket.join(connectRoom(connectId))))
+      .catch(error => console.error('socket connect rooms error:', error));
   }
+
+  // drop the socket when the login token expires
+  let expiryTimer = null;
+  const scheduleExpiry = () => {
+    if (!socket.data.tokenExp) return;
+    const delay = socket.data.tokenExp * 1000 - Date.now();
+    if (delay <= 0) return socket.disconnect(true);
+    expiryTimer = setTimeout(scheduleExpiry, Math.min(delay, MAX_TIMER_MS));
+  };
+  scheduleExpiry();
+
+  // per socket message rate limit
+  let messageTimes = [];
+  const isRateLimited = () => {
+    const now = Date.now();
+    messageTimes = messageTimes.filter(time => now - time < MESSAGE_RATE_WINDOW_MS);
+    if (messageTimes.length >= MESSAGE_RATE_LIMIT) return true;
+    messageTimes.push(now);
+    return false;
+  };
 
   // registers a handler limited to the given roles, with a safe callback and no error details to the client
   const on = (event, roles, handler) => {
@@ -157,6 +196,8 @@ io.on("connection", (socket) => {
   on('sendMessage', CHAT_ROLES, async ({ receiverId, receiverType, message, messageType }, reply) => {
     const to = parseReceiver(receiverId, receiverType);
     if (!to || typeof message !== 'string') return reply(INVALID);
+    if (message.length > MAX_MESSAGE_LENGTH || !ChatService.isValidMessageType(messageType)) return reply(INVALID);
+    if (isRateLimited()) return reply({ success: false, error: 'Too many messages' });
     if (!await ChatService.canChat(me.id, me.userType, to.id, to.type)) return reply(DENIED);
 
     const senderRoom = chatRoom(me.id, me.userType, to.id, to.type);
@@ -173,6 +214,8 @@ io.on("connection", (socket) => {
   on('createRoom', CHAT_ROLES, async ({ receiverId, receiverType }, reply) => {
     const to = parseReceiver(receiverId, receiverType);
     if (!to) return reply(INVALID);
+    // createRoom also inserts a chat row, shares the message rate limit
+    if (isRateLimited()) return reply({ success: false, error: 'Too many messages' });
     if (!await ChatService.canChat(me.id, me.userType, to.id, to.type)) return reply(DENIED);
 
     const senderRoom = chatRoom(me.id, me.userType, to.id, to.type);
@@ -246,7 +289,9 @@ io.on("connection", (socket) => {
         data.waitingList[0].group_id = groupIds[index];
         data.waitingList[0].pcp_doctor_id = id;
         data.waitingList[0].callHide = 1;
-        io.to(DOCTORS_ROOM).emit('incomingCallListFront', data);
+        // io.to(DOCTORS_ROOM).emit('incomingCallListFront', data);
+        // patient details only go to the doctor the call was offered to
+        io.to(connectRoom(id)).emit('incomingCallListFront', data);
       }
     });
     reply({ success: true });
@@ -269,7 +314,9 @@ io.on("connection", (socket) => {
         data.waitingList[0].group_id = groupIds[index];
         data.waitingList[0].pcp_doctor_id = id;
         data.waitingList[0].callHide = 0;
-        io.to(DOCTORS_ROOM).emit('incomingCallListFront', data);
+        // io.to(DOCTORS_ROOM).emit('incomingCallListFront', data);
+        // patient details only go to the doctor the call is offered to
+        io.to(connectRoom(id)).emit('incomingCallListFront', data);
       }
     });
     reply({ success: true });
@@ -290,7 +337,9 @@ io.on("connection", (socket) => {
     const data = {
       waitingList
     };
-    io.to(DOCTORS_ROOM).emit('incomingCallListFront', data);
+    // io.to(DOCTORS_ROOM).emit('incomingCallListFront', data);
+    // the waiting list only goes to the requesting doctor's connect provider room
+    io.to(connectRoom(toPositiveInt(docid))).emit('incomingCallListFront', data);
     reply({ success: true });
   });
 
@@ -350,6 +399,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", function () {
+    clearTimeout(expiryTimer);
     console.log("Socket Disconnected");
   });
 });

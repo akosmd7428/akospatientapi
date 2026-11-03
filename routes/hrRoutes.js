@@ -3,6 +3,7 @@ const HrController = require('../controllers/hrController');
 const jwtAuthHr = require('../middleware/jwtAuthHr');
 const validateSchema = require('../middleware/validateSchema');
 const { preEmpAddSchema } = require('../validation/authValidation');
+const { addEmployeeSchema } = require('../validation/hrValidation');
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
 const router = express.Router();
 
@@ -16,7 +17,7 @@ router.get('/doctorConsultancy', validateDataEncryption(),jwtAuthHr, HrControlle
 router.get('/healthRisk', validateDataEncryption(), jwtAuthHr, HrController.getCardioRecords);
 router.get('/manageEmployee', validateDataEncryption(), jwtAuthHr, HrController.getEmployeeDetails);
 router.post('/disableEnableEmployee',validateDataEncryption(), jwtAuthHr, HrController.updateEmployeeStatus);
-router.post('/addEmployee',validateDataEncryption(), jwtAuthHr, HrController.createEmployeesPatient);
+router.post('/addEmployee',validateDataEncryption(), jwtAuthHr, validateSchema(addEmployeeSchema), HrController.createEmployeesPatient);
 router.post('/updateHrProfile',validateDataEncryption(), jwtAuthHr, HrController.createOrUpdateProfile);
 router.get('/employeeEngagement',validateDataEncryption(), jwtAuthHr, HrController.engagementOfEmployee);
 router.post('/sendReminder',validateDataEncryption(), jwtAuthHr, HrController.sendReminder);

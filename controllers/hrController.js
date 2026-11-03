@@ -1,6 +1,6 @@
 const CommonHelper = require('../helpers/commonHelper');
 const { messages } = require('../config/language');
-const { STATUS_CODE } = require('../config/constant');
+const { STATUS_CODE, DEFAULT_PATIENT_PASSWORD } = require('../config/constant');
 const CareNavigator = require('../models/careNavigatorModel');
 const Patient = require('../models/patientModel');
 const AppointmentService = require('../services/appointmentService');
@@ -25,10 +25,10 @@ const crypto = require('crypto');
 const { parseCompanyIds } = require('../middleware/careNavigatorScope');
 
 // the hr row lists the companies this hr user manages, the companyId header only picks one of them.
-// returns null when the hr user is unknown/inactive or asks for a company it does not manage
+// returns null when the hr user is unknown/inactive/deleted or asks for a company it does not manage
 const getHrCompanyId = async (req) => {
-    const hr = await Hr.findByPk(req.user.id, { attributes: ['id', 'companyId', 'isActive'] });
-    if (!hr || hr.isActive == 0) return null;
+    const hr = await Hr.findByPk(req.user.id, { attributes: ['id', 'companyId', 'isActive', 'isDeleted'] });
+    if (!hr || hr.isActive == 0 || hr.isDeleted == 1) return null;
     const allowed = parseCompanyIds(hr.companyId);
     if (!allowed.length) return null;
     const header = String(req.header('companyId') ?? '').trim();
@@ -41,6 +41,9 @@ const getHrCompanyId = async (req) => {
 const companyAccessDenied = (res) => CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, "Access denied");
 
 class HrController {
+
+    // the unscoped "login as any patient" below must stay off, see the note above the unused methods
+    static ALLOW_UNSCOPED_LOGIN = false;
 
     static async getProfileDetails(req, res) {
         try {           
@@ -339,13 +342,14 @@ class HrController {
             const companyId_header = await getHrCompanyId(req);
             if (!companyId_header) return companyAccessDenied(res);
             // find patient email exist or not     
-            const  password = 'Akosmd@123';
+            // default password comes from config (DEFAULT_PATIENT_PASSWORD), must be replaced by a set-password link
+            const  password = DEFAULT_PATIENT_PASSWORD;
             //const hashedPassword = await bcrypt.hash(password, 10);
             const hashedPassword = crypto.createHash('md5').update(password).digest('hex');
             let patientEmail = email;
             const patientEmailExt = await Patient.findOne({ where: { email } });
             if(patientEmailExt != null){ 
-                CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.serverError, 'Email is already registered.');
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.serverError, 'Email is already registered.');
             }else{
                 const PatientData = {
                     "connectionType" : 1,
@@ -451,6 +455,13 @@ class HrController {
     }
       
 
+    // ------------------------------------------------------------------
+    // unused methods: prescriptions, updateLabOrder, uploadLabReport, getPackages, sendEmail,
+    // getLabOrdersByPatient, login, uploadPrescription are not routed in routes/hrRoutes.js.
+    // they are copies of the care navigator handlers and have no company scope checks
+    // (any orderId / patientId is accepted). do not route them without adding getHrCompanyId
+    // scope checks first. login (sign in as any patient) is disabled by ALLOW_UNSCOPED_LOGIN.
+    // ------------------------------------------------------------------
     static async prescriptions(req, res) {
         try {
             const prescriptions = await labTestService.getPrescriptionUploaded();
@@ -535,6 +546,10 @@ class HrController {
     }
 
     static async login(req, res, next) {
+        // unscoped impersonation of any patient, refused unless explicitly enabled
+        if (!HrController.ALLOW_UNSCOPED_LOGIN) {
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, "Access denied");
+        }
         try {
           const { patientId } = req.body;
           let userDetails;
@@ -600,7 +615,7 @@ class HrController {
                 }
             }
             const patient = await Patient.findOne({where: { id: patientId} }); 
-            console.log(patient,'patient===');
+            // console.log(patient,'patient===');
             if(patient){
                 await emailHelperSMTP(null, patient.email, ...Object.values(EmailTemplates.prescriptionReady({ name: `${patient.first_name} ${patient.last_name}`, link: prescriptionURL }))); 
             }

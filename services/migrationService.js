@@ -1,6 +1,7 @@
 const { sequelizeDB1 } = require('../config/sequelize');
 const { QueryTypes, Op } = require('sequelize');
 const crypto = require('crypto');
+const { DEFAULT_PATIENT_PASSWORD } = require('../config/constant');
 const WorksmanCompanyList = require('../models/worksmanCompanyList');
 const Patient = require('../models/patientModel');
 const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient');
@@ -8,7 +9,9 @@ const LabOrder = require('../models/labOrder');
 const LabOrderDetails = require('../models/labOrderDetails');
 const Doctor = require('../models/doctorModel');
 
-const DEFAULT_PASSWORD = 'Akosmd@123';
+// const DEFAULT_PASSWORD = 'Akosmd@123';
+// default password comes from config (DEFAULT_PATIENT_PASSWORD), must be replaced by a set-password link
+const DEFAULT_PASSWORD = DEFAULT_PATIENT_PASSWORD;
 const DEFAULT_LAB_ID = 0;
 const DEFAULT_PRICE = 0;
 

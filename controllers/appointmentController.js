@@ -7,12 +7,20 @@ const labTestService = require('../services/labTestService');
 const VitalMonitoringService = require('../services/vitalMonitoringService');
 const PatientService = require('../services/patientService');
 const Appointment = require('../models/appointmentModel');
+const PatientCareTeamService = require('../services/patientCareTeamService');
 class AppointmentController {
     static async bookAppointment(req, res, next) {
         try {
-            const { doctorId, date, time, is_paid} = req.body;
+            const { doctorId, date, time} = req.body;
             // appointments are always booked for the logged in patient
             const patientId = req.user.id;
+            // only a doctor of a company the patient is connected to
+            const allowedDoctorIds = await PatientCareTeamService.getAllowedDoctorIds(patientId, [doctorId]);
+            if (!allowedDoctorIds.includes(Number(doctorId))) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, 'Doctor not allowed');
+            }
+            // is_paid from the app is ignored, set from a verified call payment for this slot
+            const is_paid = (await AppointmentService.hasPaidAppointmentPayment(patientId, date, time)) ? 1 : 0;
             const appointmentData = {
                 patientId,
                 doctorId,

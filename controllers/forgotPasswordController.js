@@ -15,8 +15,8 @@ class ForgotPasswordController {
 
   static async verifyOtp(req, res, next) {
     try {
-      const message = await ForgotPasswordService.verifyOtp(req.body.email, req.body.otp);
-      CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, message);
+      const { message, resetToken } = await ForgotPasswordService.verifyOtp(req.body.email, req.body.otp, req.ip);
+      CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, message, { resetToken });
     } catch (error) {
       CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.invalidOtp);
     }
@@ -25,7 +25,7 @@ class ForgotPasswordController {
   // forgot password flow, needs the otp of this email to have been verified just before
   static async changePassword(req, res, next) {
     try {
-      const message = await ForgotPasswordService.resetPassword(req.body.email, req.body.newPassword);
+      const message = await ForgotPasswordService.resetPassword(req.body.email, req.body.newPassword, { clientIp: req.ip, resetToken: req.body.resetToken || null });
       CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, message);
     } catch (error) {
       ForgotPasswordController.sendChangeError(res, error);

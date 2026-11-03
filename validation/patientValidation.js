@@ -1,4 +1,16 @@
 const Joi = require('joi');
+const { isOwnUpload } = require('./prescriptionValidator');
+
+// profile image must be a file uploaded through /data/upload, the image already saved on the profile is always accepted
+// (the controller passes the saved ones as context.storedImages so old images from another host keep working)
+const isOwnProfileImage = (value, helpers) => {
+    const storedImages = (helpers.prefs.context && helpers.prefs.context.storedImages) || [];
+    if (storedImages.includes(value)) return value;
+    return isOwnUpload(value, helpers);
+};
+const profileImageSchema = Joi.string().allow('', null).custom(isOwnProfileImage).messages({
+    'string.uri': 'Profile image is invalid.'
+});
 
 const socialHistorySchema = Joi.object({
     smoking: Joi.string().valid('Past', 'Present', 'Never').allow(''),
@@ -55,6 +67,25 @@ const familyHistorySchema = Joi.object({
     relation_drug_abuse: Joi.string().allow(''),
 });
 
+// one dependent of the profile form, extra fields the frontend sends (patientId, parentId, ...) still pass
+const textOrNumber = Joi.alternatives().try(Joi.string().allow(''), Joi.number()).allow(null);
+const dependentSchema = Joi.object({
+    id: textOrNumber,
+    fullname: Joi.string().allow('', null),
+    email: Joi.string().trim().email({ tlds: { allow: false } }).allow('', null).messages({
+        'string.email': 'Dependent email must be a valid email.'
+    }),
+    phone: textOrNumber,
+    dateofbirth: Joi.string().allow('', null),
+    gender: Joi.string().allow('', null),
+    city: Joi.string().allow('', null),
+    state: Joi.string().allow('', null),
+    zip_code: textOrNumber,
+    age: textOrNumber,
+    profile_image: profileImageSchema,
+    family_history: Joi.object().allow(null),
+}).unknown(true);
+
 const createOrUpdatePatientSchema = Joi.object({
     id: Joi.number().optional(),
     fullname: Joi.string().required(),
@@ -70,7 +101,7 @@ const createOrUpdatePatientSchema = Joi.object({
     weight: Joi.string().allow(''),
     bloodgroup: Joi.string().allow(''),
     emergency_contact: Joi.string().allow(''),
-    profile_image: Joi.string().allow(''),
+    profile_image: profileImageSchema,
     aadharcard: Joi.string().allow(''),
     abha_id: Joi.string().allow(''),
     past_operation_detail: Joi.string().allow(''),
@@ -84,7 +115,7 @@ const createOrUpdatePatientSchema = Joi.object({
     medical_allergies: Joi.array().items(Joi.string()).allow(null),
     health_problems: Joi.array().items(Joi.string()).allow(null),
     family_history: Joi.object().allow(null),
-    dependents: Joi.array().allow(null),
+    dependents: Joi.array().items(dependentSchema).allow(null),
 });
 
 module.exports = {

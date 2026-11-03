@@ -49,7 +49,7 @@ class DataController {
             }
 
             // Upload the file
-            const fileUrl = await DataService.uploadFile(file, type);
+            const fileUrl = await DataService.uploadFile(file, type, req.user && req.user.role);
 
             // Respond with the file URL
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.fileUploaded, { fileUrl });

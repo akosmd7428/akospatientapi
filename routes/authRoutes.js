@@ -1,7 +1,7 @@
 const express = require('express');
 const AuthController = require('../controllers/authController');
 const validateSchema = require('../middleware/validateSchema');
-const { loginSchema, externalSignupSchema, ssoClientLoginSchema, ssoGenerateCodeSchema, ssoVerifyCodeSchema, ssoDeeplinkSchema} = require('../validation/authValidation');
+const { registerSchema, loginSchema, externalSignupSchema, ssoClientLoginSchema, ssoGenerateCodeSchema, ssoVerifyCodeSchema, ssoDeeplinkSchema} = require('../validation/authValidation');
 const jwtAuth = require('../middleware/jwtAuth');
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
 const syncApiKeyAuth = require('../middleware/syncApiKeyAuth');
@@ -19,8 +19,15 @@ const ssoGenerateCodeAuth = (req, res, next) => {
     return authorize(ROLES.CARE_NAVIGATOR)(req, res, (err) => (err ? next(err) : loadCareNavigatorScope(req, res, next)));
 };
 
-// removed: /register (unverified accounts, bcrypt hash that login can never match), /encrypt, /decrypt, /getquery (debug decryption oracle),
-// /ssologin (unauthenticated company/patient creation, the hr portal calls the ohc api for it), /external-signup-old (no email verification)
+// kept from main but only for server callers with the x-sync-api-key header:
+// /register (unverified accounts, bcrypt hash that login can never match), /encrypt, /decrypt, /getquery (debug encryption/decryption oracle),
+// /ssologin (company/patient creation, the hr portal calls the ohc api for it), /external-signup-old (no email verification)
+router.post('/register', syncApiKeyAuth, validateDataEncryption(), validateSchema(registerSchema), AuthController.register);
+router.post('/encrypt', syncApiKeyAuth, AuthController.encryptDataSample);
+router.post('/decrypt', syncApiKeyAuth, AuthController.decryptDataSample);
+router.get('/getquery', syncApiKeyAuth, AuthController.getQueryStr);
+router.post('/ssologin', syncApiKeyAuth, AuthController.ssologin);
+router.post('/external-signup-old', syncApiKeyAuth, validateDataEncryption(), validateSchema(externalSignupSchema), AuthController.externalSignup);
 router.post('/login',validateSchema(loginSchema), AuthController.login);
 router.post('/sso-client-login', clientAuth, validateSchema(ssoClientLoginSchema), AuthController.ssoClientLogin);
 router.post('/sso-generate-code', ssoGenerateCodeAuth, validateDataEncryption(), validateSchema(ssoGenerateCodeSchema), AuthController.ssoGenerateCode);

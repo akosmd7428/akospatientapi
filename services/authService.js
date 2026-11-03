@@ -1,6 +1,8 @@
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const Patient = require('../models/patientModel');
 const crypto = require('crypto');
+const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient');
 const CareNavigator = require('../models/careNavigatorModel');
 const Hr = require('../models/hrModel');
 
@@ -25,6 +27,25 @@ const md5Equals = (hash, storedHash) => {
 
 class AuthService {
   static INVALID_LOGIN = INVALID_LOGIN;
+
+  static async isPatientDisabled(patientId) {
+    const [rows] = await Patient.sequelize.query('SELECT is_active FROM patient WHERE id = :patientId LIMIT 1', { replacements: { patientId } });
+    return Boolean(rows[0]) && rows[0].is_active !== null && Number(rows[0].is_active) === 0;
+  }
+
+  static async register(data) {
+    const { email, password, first_name, last_name } = data;
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const patient = await Patient.create({
+      email,
+      password: hashedPassword,
+      first_name,
+      last_name,
+    });
+
+    return patient;
+  }
 
   // plain copy of a user row without the password hash and other secrets
   static safeUser(user) {
@@ -51,14 +72,19 @@ class AuthService {
     if (getRole !== 'patient' && (user.isActive == 0 || user.isDeleted == 1)) {
       throw new Error(INVALID_LOGIN);
     }
+    // employees disabled by their hr cannot log in (is_active is not mapped on the model, only hr sets it to 0)
+    if (getRole === 'patient' && await AuthService.isPatientDisabled(user.id)) {
+      throw new Error(INVALID_LOGIN);
+    }
 
     const token = jwt.sign({ id: user.id, email: user.email, role: getRole }, process.env.JWT_SECRET, { expiresIn: '1d' });
 
     return { token, user, role: loginRole.role };
   }
 
-  static async patientLogin(patient) {
-    const token = jwt.sign({ id: patient.id, email: patient.email, role:"patient" }, process.env.JWT_SECRET, { expiresIn: '1d' });
+  // extraClaims carries act/actId when a care navigator signs in as the patient
+  static async patientLogin(patient, extraClaims = {}) {
+    const token = jwt.sign({ ...extraClaims, id: patient.id, email: patient.email, role:"patient" }, process.env.JWT_SECRET, { expiresIn: '1d' });
 
     return { token };
   }

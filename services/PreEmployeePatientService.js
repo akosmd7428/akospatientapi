@@ -404,7 +404,7 @@ class PreEmployeePatientService {
                     replacements.fromDate = from_date;
                     replacements.toDate = to_date;
                 }
-                console.log(replacements);
+                // console.log(replacements);
                 const result = await sequelizeDB1.query(query, {  
                     replacements,      
                     type: QueryTypes.SELECT,
@@ -796,8 +796,8 @@ class PreEmployeePatientService {
             }else{
                 query +=` AND p.is_active = 1`;
             } 
-            console.log(status) ;         
-            console.log(query);
+            // console.log(status) ;         
+            // console.log(query);
            // const replacements = {};
             const replacements = {         
                 companyId: companyId  // The doctor's ID
@@ -824,8 +824,8 @@ class PreEmployeePatientService {
                 const updateData = {
                     "is_active" : status           
                 }
-                console.log(updateData);
-                console.log(patientId);
+                // console.log(updateData);
+                // console.log(patientId);
                 // const data = await Patient.update(updateData, { 
                 //     where: { id: patientId } 
                 // });

@@ -5,7 +5,10 @@ const CareNavigator = require('../models/careNavigatorModel');
 const Patient = require('../models/patientModel');
 const AppointmentService = require('../services/appointmentService');
 const PatientService = require('../services/patientService');
-const { APPOINTMENT_STATUS, SEND_CONTACT_EMAIL_TO_ADMIN, PRESCRIPTION_LINK_SECRET } = require('../config/secret');
+const { APPOINTMENT_STATUS, SEND_CONTACT_EMAIL_TO_ADMIN, PRESCRIPTION_LINK_SECRET, JWT_SECRET } = require('../config/secret');
+const jwt = require('jsonwebtoken');
+const { logError } = require('../helpers/logErrorHelper');
+const { isLabOrderStatus, isPreEmployeeStatus, isAllowedUploadUrl } = require('../validation/careNavigatorValidation');
 const labTestService = require('../services/labTestService');
 const HelpService = require('../services/helpService');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
@@ -357,6 +360,10 @@ class CareNavigatorController {
 
         const { orderId, status, labId, labCityId, subCityId, labBranchId } = req.body;
         try {
+            // only known lab order statuses are stored
+            if (!isLabOrderStatus(status)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Invalid status");
+            }
             if (!await labOrderInScope(orderId, req.careCompanyIds)) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
             }
@@ -460,6 +467,10 @@ class CareNavigatorController {
 
         const { orderId, labReportURL } = req.body;
         try {
+            // report link must be a file uploaded to our own server
+            if (!isAllowedUploadUrl(labReportURL)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Invalid report url");
+            }
             if (!await labOrderInScope(orderId, req.careCompanyIds)) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
             }
@@ -542,8 +553,16 @@ class CareNavigatorController {
             if (!userDetails || userDetails.length === 0) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided patient Id.");
             }
-            // plain patient token, same as a normal patient login
-            let { token } = await AuthService.patientLogin(patient);
+            // patient token issued on behalf of the care navigator, act/actId mark the impersonation
+            // let { token } = await AuthService.patientLogin(patient);
+            const token = jwt.sign(
+                { id: patient.id, email: patient.email, role: 'patient', act: 'careNavigator', actId: req.user.id },
+                JWT_SECRET,
+                { expiresIn: '2h', algorithm: 'HS256' }
+            );
+            // audit trail, ids only
+            console.info(`[audit] careNavigator ${req.user.id} logged in as patient ${patient.id}`);
+            logError(req.user.id, 'careNavigator login as patient', 'careNavigatorController.js', 'login', null, JSON.stringify({ careNavigatorId: req.user.id, patientId: patient.id }), 'careNavigator');
             userDetails.currentRole = "patient";
             const loggedBy = "careNavigator";
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails, loggedBy });          
@@ -563,6 +582,10 @@ class CareNavigatorController {
         const prescriptionUniqueId = Math.floor(10000 + Math.random() * 90000);
         //write code to upload prescription
         if(patientId && req.body.doctorId && appointmentId && prescriptionURL){
+            // prescription link is emailed to the patient, only accept files uploaded to our own server
+            if (!isAllowedUploadUrl(prescriptionURL)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Invalid prescription url");
+            }
             // the appointment must be this patient's and the patient in the care navigator's companies
             const appointment = await appointmentInScope(appointmentId, req.careCompanyIds);
             if (!appointment || Number(appointment.patientId) !== Number(patientId)) {
@@ -634,6 +657,13 @@ class CareNavigatorController {
      static async updateLabPreLabReport(req, res) {
         const {  status, report_url, id,report_remark } = req.body;
          try {
+            // only known pre employee statuses and our own upload links are stored
+            if (!isPreEmployeeStatus(status)) {
+                return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Invalid status");
+            }
+            if (report_url && !isAllowedUploadUrl(report_url)) {
+                return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, "Invalid report url");
+            }
             // pre employee must belong to one of the care navigator's companies
             const preEmployee = await PreEmployeePatientService.getPreEmployeeInCompanies(id, req.careCompanyIds);
             if (!preEmployee) {

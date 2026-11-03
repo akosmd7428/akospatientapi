@@ -9,6 +9,7 @@ const { laravelDecrypt } = require('../helpers/laravelCrypt');
 const PatientService = require('../services/patientService');
 const { logError } = require('../helpers/logErrorHelper');
 const { redact } = require('../helpers/redact');
+const { encryptData, decryptData } = require('../config/encryption');
 const DoctorService = require('../services/doctorService');
 const crypto = require('crypto');
 const { JWT_SECRET, PATIENT_FRONTEND_URL } = require('../config/secret');
@@ -20,12 +21,118 @@ const jwt = require('jsonwebtoken');
 const SSO_CODE_EXPIRY_SECONDS = 300;
 // purpose claim of the email verification link token, it is never a login token
 const EMAIL_VERIFY_PURPOSE = 'email_verification';
+// sso codes created by a care navigator (codeHash -> care navigator id), the login token then carries the act claim
+// so the navigator cannot change the patient's password. in memory because sso_login_codes has no creator column
+const ssoCodeActors = new Map();
 
 class AuthController {
   // log the error with a redacted body, the response never carries the internal message
   static logAuthError(error, req) {
     const lineNumber = error && error.stack ? error.stack.split('\n')[1] : 'Unknown';
     logError(null, error ? error.message : 'Unknown error', req.path, 'authController', lineNumber, JSON.stringify(redact(req.body)), null);
+  }
+
+  // kept from main, route is restricted to server callers with the sync api key
+  static async register(req, res, next) {
+    try {
+      const { first_name, last_name, email, password } = req.body;
+      const patient = await AuthService.register({ first_name, last_name, email, password });
+      return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_201_CREATED, messages.registrationSuccess, { patient: AuthService.safeUser(patient) });
+    } catch (error) {
+      AuthController.logAuthError(error, req);
+      return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.serverError);
+    }
+  }
+
+  // kept from main (debug helper), route is restricted to server callers with the sync api key
+  static async encryptDataSample(req, res, next) {
+    try {
+      //let EntData = encryptData(`{ "email": "nikhils@gmail.com","password": "Nikhil@akos"}`);
+     // let data = `{ "email": "nikhils@gmail.com","password": "Nikhil@akos"}`;
+      let data = req.body;
+     // let EntData = encryptData(data);
+     let EntData = data;
+      return CommonHelper.sendEncryptData(res, true, STATUS_CODE.HTTP_201_CREATED, messages.registrationSuccess, { EntData });
+    } catch (error) {
+      AuthController.logAuthError(error, req);
+      return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.serverError);
+    }
+  }
+
+  // kept from main (debug helper), route is restricted to server callers with the sync api key
+  static async decryptDataSample(req, res, next) {
+    try {
+      const { encryptedData,IV } = req.body;
+      let result = decryptData(encryptedData,IV);
+      result = JSON.parse(result);
+      let msgg = 'Decrypt success';
+      return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, msgg, { result });
+    } catch (error) {
+      AuthController.logAuthError(error, req);
+      return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'Decrypt failed');
+    }
+  }
+
+  // kept from main (debug helper), route is restricted to server callers with the sync api key
+  static async getQueryStr(req, res, next) {
+    try {
+      const { encryptedData,IV } = req.body;
+      let result = decryptData(encryptedData,IV);
+      result = JSON.parse(result);
+      let msgg = 'Decrypt success';
+      return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, msgg, { result });
+    } catch (error) {
+      AuthController.logAuthError(error, req);
+      return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'Decrypt failed');
+    }
+  }
+
+  // kept from main, route is restricted to server callers with the sync api key
+  // note: as on main this creates the company/patient but then fails, email/password/companyDetails are never defined here
+  static async ssologin(req, res, next) {
+    try {
+      const {origin_company,origin_company_address,company_name,employee_name,employee_email,employee_mobile,company_address} = req.body;
+      const uuid = CommonHelper.generateUuidV4();
+      if(origin_company){
+        //check company and create the company
+        const originalCompanyDetails = await PatientService.createOrCheckEmployee(origin_company, origin_company_address,0);
+        if(originalCompanyDetails>0){
+          const parent_id =  originalCompanyDetails;
+          const companyDetails = await PatientService.createOrCheckEmployee(company_name,company_address,parent_id);
+         // create emplyoyee
+         const company_id = companyDetails;
+         const patientDEtails = await PatientService.createOrCheckPatient(employee_name,employee_email,employee_mobile,company_id,uuid);
+        }else{
+          const parent_id = 0;
+          const companyDetails = await PatientService.createOrCheckEmployee(company_name,company_address,parent_id);
+          const company_id = companyDetails;
+          const patientDEtails = await PatientService.createOrCheckPatient(employee_name,employee_email,employee_mobile,company_id,uuid);
+        }
+        console.log(companyDetails);
+      }
+      const getRole = req.header("role") || null;
+      let userDetails;
+      //Login as Patient after first time
+      let { token, user, role } = await AuthService.login({ email, password, getRole });
+
+
+      if(getRole){
+        if(getRole == "patient"){
+          if(role == 1){
+            userDetails = await PatientService.getPatientDetailsByEmail(email, user);
+            if (userDetails.length === 0) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided email.");
+            }
+            userDetails.role = "patient";
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.loginSuccess, { token, userDetails });
+          }
+        }
+      }
+      throw new Error("No user found");
+    } catch (error) {
+      AuthController.logAuthError(error, req);
+      return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.serverError);
+    }
   }
 
   static async login(req, res, next) {
@@ -192,8 +299,8 @@ class AuthController {
   }
 
   // create the login token and the patient details returned by the sso apis
-  static async ssoLoginResponse(res, patient, additionalData = {}) {
-    const { token } = await AuthService.patientLogin(patient);
+  static async ssoLoginResponse(res, patient, additionalData = {}, extraClaims = {}) {
+    const { token } = await AuthService.patientLogin(patient, extraClaims);
     const userDetails = await PatientService.getPatientDetailsByEmail(patient.email, patient);
     if (userDetails.length === 0) {
       return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided email.");
@@ -303,6 +410,11 @@ class AuthController {
       const codeHash = crypto.createHash('sha256').update(code).digest('hex');
       const expiresAt = new Date(Date.now() + SSO_CODE_EXPIRY_SECONDS * 1000);
       await SsoLoginCode.create({ codeHash, patientId: patient.id, companyId: patient.companyId || 0, expiresAt });
+      if (req.user && req.user.role === 'careNavigator') {
+        ssoCodeActors.set(codeHash, req.user.id);
+        setTimeout(() => ssoCodeActors.delete(codeHash), SSO_CODE_EXPIRY_SECONDS * 1000).unref();
+        console.info(`[audit] careNavigator ${req.user.id} created sso code for patient ${patient.id}`);
+      }
 
       const login_url = `${PATIENT_FRONTEND_URL}/sso-login?code=${code}`;
       return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.sso_code_generated, { code, expires_in: SSO_CODE_EXPIRY_SECONDS, login_url });
@@ -331,7 +443,9 @@ class AuthController {
       if (!patient) {
         return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_404_NOT_FOUND, "No patient found with the provided email.");
       }
-      return await AuthController.ssoLoginResponse(res, patient);
+      const actorId = ssoCodeActors.get(codeHash);
+      ssoCodeActors.delete(codeHash);
+      return await AuthController.ssoLoginResponse(res, patient, {}, actorId ? { act: 'careNavigator', actId: actorId } : {});
     } catch (error) {
       AuthController.logAuthError(error, req);
       return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
@@ -480,6 +594,49 @@ class AuthController {
     AuthController.logAuthError(error, req);
     return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
   }
+  }
+
+  // sign up for the external employee (old flow, no email verification)
+  // kept from main, route is restricted to server callers with the sync api key
+  static async externalSignup(req, res, next){
+     try {
+        const {employer_id,company_name,employee_name,employee_email,employee_mobile,employee_password,company_address} = req.body;
+        const uuid = CommonHelper.generateUuidV4();
+        // Input string to hash
+        const input = employee_password;
+      // Create MD5 hash
+      const hash_password = crypto.createHash('md5').update(input).digest('hex');
+
+        if(employer_id){
+        //check company and create the company
+          const companyDetails = await PatientService.getCompanyDetails(employer_id);
+          if(companyDetails[0]){
+            const company_id = companyDetails[0].id;
+            const befor_email_valid = 0;
+            const validate_token = '';
+            const patientDEtails = await PatientService.createOrCheckPatient(employee_name,employee_email,employee_mobile,company_id,uuid,hash_password,company_name,company_address,befor_email_valid,validate_token);
+            if(patientDEtails == 1){
+
+              const { employer_id } = company_id;
+              const  search  = '';
+              const doctors = await DoctorService.getDoctorsByEmployer(employer_id, search);
+
+              return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.user_signup);
+            }else{
+               return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.userCreated, { patientDEtails });
+            }
+
+          }else{
+             return CommonHelper.sendError(res,  STATUS_CODE.HTTP_400_BAD_REQUEST, messages.unauthorize_signup);
+          }
+
+      }else{
+        return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.unauthorize_signup);
+      }
+    } catch (error) {
+      AuthController.logAuthError(error, req);
+      return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.serverError);
+    }
   }
 
 }

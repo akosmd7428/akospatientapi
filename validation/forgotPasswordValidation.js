@@ -9,9 +9,11 @@ const verifyOtpValidation = Joi.object({
   otp: Joi.string().required(),
 });
 
+// resetToken comes from verify-otp, optional so older frontends keep working from the same ip
 const changePasswordValidation = Joi.object({
   email: Joi.string().email().required(),
   newPassword: Joi.string().min(6).required(),
+  resetToken: Joi.string().hex().length(64).optional(),
 });
 
 // logged in password change, the email is still accepted from the frontends but never used

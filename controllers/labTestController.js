@@ -5,6 +5,11 @@ const { STATUS_CODE } = require('../config/constant');
 const LabOrder = require('../models/labOrder');
 const LabTestPrescription = require('../models/labTestPrescriptions');
 const { ROLES } = require('../middleware/authorize');
+// care navigator lab notifications: statuses the service handles + per patient limit
+const LAB_NOTIFY_STATUSES = ['confirmed', 'cancelled', 'Completed', 'Report Generated', 'Reschedule'];
+const LAB_NOTIFY_MAX = 5;
+const LAB_NOTIFY_WINDOW_MS = 10 * 60 * 1000;
+const labNotifyAttempts = new Map();
 
 class labTestController {
     static async getPackagesAndTests(req, res) {
@@ -878,7 +883,29 @@ class labTestController {
     // get lab item with code 
      static async labtestNotification(req, res){
         try {
-            const { status } = req.body;
+            let { status } = req.body;
+            const { orderId } = req.body;
+            // limit notifications per patient
+            const now = Date.now();
+            const attempt = labNotifyAttempts.get(req.user.id);
+            if (attempt && attempt.resetAt > now) {
+                if (attempt.count >= LAB_NOTIFY_MAX) {
+                    return CommonHelper.sendErrorUnencrypt(res, 429, 'Too many requests, please try again later');
+                }
+                attempt.count += 1;
+            } else {
+                labNotifyAttempts.set(req.user.id, { count: 1, resetAt: now + LAB_NOTIFY_WINDOW_MS });
+            }
+            if (orderId !== undefined && orderId !== null && orderId !== '') {
+                // status of the patient's own order, never the status sent by the app
+                const order = await LabOrder.findOne({ where: { id: orderId, patientId: req.user.id } });
+                if (!order) {
+                    return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_404_NOT_FOUND, 'Order not found');
+                }
+                status = order.orderStatus;
+            } else if (!LAB_NOTIFY_STATUSES.includes(status)) {
+                return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'Invalid status');
+            }
             // always the logged-in patient, never a patient_id sent by the app
             const result = await LabTestService.sentCareNavigatorNotification(req.user.id,status);
             return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, "No coupon found",{result});

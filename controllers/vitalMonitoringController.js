@@ -2,6 +2,11 @@ const VitalMonitoringService = require('../services/vitalMonitoringService');
 const CommonHelper = require('../helpers/commonHelper');
 const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
+const LabTestService = require('../services/labTestService');
+const Patient = require('../models/patientModel');
+// vital_monitoring_comment.user_type, 2 = care navigator (sent by the app), 1 = patient
+const USER_TYPE_PATIENT = 1;
+const USER_TYPE_CARE_NAVIGATOR = 2;
 
 
 class VitalMonitoringController {   
@@ -98,7 +103,19 @@ class VitalMonitoringController {
          try{
             const { device_id, comment, created_by, user_type } = req.body;
             // the comment is always attached to the logged in patient, id/status/patient_id from the client are ignored
-            const post_details = { device_id, comment, created_by, user_type, patient_id: req.user.id };
+            // care navigator comments (sso session, user_type 2) keep created_by only when it is a care navigator
+            // of the patient's company, everything else is a comment by the logged in patient
+            let authorId = req.user.id;
+            let authorType = USER_TYPE_PATIENT;
+            if (Number(user_type) === USER_TYPE_CARE_NAVIGATOR && created_by) {
+                const patient = await Patient.findOne({ where: { id: req.user.id } });
+                const careNavigators = patient ? await LabTestService.getCareNavigatorsForPatient(patient) : [];
+                if (careNavigators.some(row => Number(row.id) === Number(created_by))) {
+                    authorId = Number(created_by);
+                    authorType = USER_TYPE_CARE_NAVIGATOR;
+                }
+            }
+            const post_details = { device_id, comment, created_by: authorId, user_type: authorType, patient_id: req.user.id };
             const deviceComments = await VitalMonitoringService.postDeviceComment(post_details);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { deviceComments });
         }catch(error){

@@ -3,7 +3,10 @@ const { PATIENT_BACKEND_URL } = require('../config/secret');
 
 // the prescription must be a file uploaded through /data/upload, never an arbitrary external url
 const isOwnUpload = (value, helpers) => {
-    if (PATIENT_BACKEND_URL && !value.startsWith(`${PATIENT_BACKEND_URL.replace(/\/+$/, '')}/assets/`)) {
+    // dataService builds the url as PATIENT_BACKEND_URL + '/assets/...', so a base with a trailing slash gives '//assets/'
+    if (PATIENT_BACKEND_URL
+        && !value.startsWith(`${PATIENT_BACKEND_URL.replace(/\/+$/, '')}/assets/`)
+        && !value.startsWith(`${PATIENT_BACKEND_URL}/assets/`)) {
         return helpers.error('string.uri');
     }
     return value;
@@ -23,5 +26,6 @@ const uploadPrescriptionSchema = Joi.object({
 });
 
 module.exports = {
-    uploadPrescriptionSchema
+    uploadPrescriptionSchema,
+    isOwnUpload
 };

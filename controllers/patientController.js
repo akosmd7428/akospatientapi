@@ -34,12 +34,38 @@ class PatientController {
         // try {
             let patient;
             let errorPatient = 0;
-            const { error } = createOrUpdatePatientSchema.validate(req.body);
+            // the profile images already saved for this patient and its dependents stay valid even when not on our upload host
+            const familyIds = [req.user.id, ...(await Patient.findAll({
+                attributes: ['id'],
+                where: { parent_id: req.user.id },
+                raw: true
+            })).map(row => row.id)];
+            const storedImages = (await PatientDetail.findAll({
+                attributes: ['profile_image'],
+                where: { patientId: { [Sequelize.Op.in]: familyIds } },
+                raw: true
+            })).map(row => row.profile_image).filter(Boolean);
+            const { error } = createOrUpdatePatientSchema.validate(req.body, { context: { storedImages } });
             if (error) return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.details[0].message);
 
             patient = await Patient.findByPk(req.user.id);
             if (!patient) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.userNotFound);
+            }
+
+            // an existing dependent's email can't be changed to an email that already belongs to another patient
+            if (dependents && Array.isArray(dependents)) {
+                for (const dependent of dependents) {
+                    const dependentId = parseInt(dependent.id, 10);
+                    const newEmail = dependent.email ? String(dependent.email).trim() : '';
+                    if (!dependentId || !newEmail) continue;
+                    const existingDependent = await Patient.findOne({ where: { id: dependentId, parent_id: req.user.id } });
+                    if (!existingDependent || String(existingDependent.email || '').trim().toLowerCase() === newEmail.toLowerCase()) continue;
+                    const emailOwner = await Patient.findOne({ where: { email: newEmail, id: { [Sequelize.Op.ne]: dependentId } }, attributes: ['id'] });
+                    if (emailOwner) {
+                        return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.user_signup);
+                    }
+                }
             }
             //Update Patient Profile Details only 
             if(req.body.age != '' && req.body.age > 17){
@@ -93,7 +119,9 @@ class PatientController {
                        } 
                    });                    
                 //   Delete dependents in the Patient table
-               await Patient.destroy({ where: { parent_id: req.user.id } });
+               // only the removed dependents, deleting every dependent of the parent also dropped the ones still on the form
+               // await Patient.destroy({ where: { parent_id: req.user.id } });
+               await Patient.destroy({ where: { parent_id: req.user.id, id: { [Sequelize.Op.in]: toBeDeleteIds } } });
             }
             // Delete existing dependents and their details
             // const dependentIds = (await Patient.findAll({
@@ -147,7 +175,7 @@ class PatientController {
                         console.log(id,'id====');
                         
                         if(dependent.age > 17 && dependent.id != req.user.id){
-                            const profileCompletionLink = `${PATIENT_FRONTEND_URL}/forgot-password?email=${dependent.email}`;
+                            const profileCompletionLink = `${PATIENT_FRONTEND_URL}/forgot-password?email=${encodeURIComponent(dependent.email)}`;
                             const { subject, html } = EmailTemplates.dependentInvite({ link: profileCompletionLink });
                             emailHelperSMTP(dependent.email, dependent.email, subject, html);
                         }
@@ -292,11 +320,12 @@ class PatientController {
             // }
         }
         
-        // Fetch patient details if patientId is available
-        if (patientId) {
-            patientDetails = await AppointmentService.talkToDoctorDetails(patientId);
-            patientDetail = await AppointmentService.getPatientDetails(patientId);
-        }
+        // patient details are fetched below, only after the doctor is checked to be linked to the patient / call
+        // if (patientId) {
+        //     patientDetails = await AppointmentService.talkToDoctorDetails(patientId);
+        //     patientDetail = await AppointmentService.getPatientDetails(patientId);
+        // }
+        let doctor;
         // doctor details always come from the logged in doctor, the email query param is ignored
         {
             // email = decodeURIComponent(email);
@@ -304,7 +333,7 @@ class PatientController {
                 // decryptedEmail += String.fromCharCode(email.charCodeAt(i) ^ secretKey.charCodeAt(i % secretKey.length));
             // }
             // if(decryptedEmail){
-                const doctor = await Doctor.findOne({ where: { id: req.user.id } });
+                doctor = await Doctor.findOne({ where: { id: req.user.id } });
                 if(!doctor){
                     throw new Error("Something went wrong!");
                 }
@@ -313,7 +342,21 @@ class PatientController {
                 }
             // }
         }
-        
+
+        // the doctor must be on that call (and the call must be this patient's), or have an appointment / care team link
+        if (patientId || cid) {
+            const linked = await PatientService.isDoctorLinkedToPatient(doctor, patientId || 0, cid || null);
+            if (!linked) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, 'Access denied');
+            }
+        }
+
+        // Fetch patient details if patientId is available
+        if (patientId) {
+            patientDetails = await AppointmentService.talkToDoctorDetails(patientId);
+            patientDetail = await AppointmentService.getPatientDetails(patientId);
+        }
+
         // Construct response based on the available data
         if (patientDetails) {
             response.patientDetail = {

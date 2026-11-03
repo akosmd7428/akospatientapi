@@ -6,6 +6,12 @@ const { PATIENT_BACKEND_URL } = require('../config/secret');
 
 // folders under assets/ the frontends upload into (chat attachments, lab reports, profile pictures, prescriptions)
 const UPLOAD_TYPES = ['chat', 'report', 'patient', 'careNavigator', 'hr', 'prescription', 'ohc'];
+// folders each role may upload into, taken from what the portals send, so a patient cannot plant files in the hr or care navigator folders
+const UPLOAD_TYPES_BY_ROLE = {
+    patient: ['chat', 'report', 'patient', 'prescription'],
+    careNavigator: ['chat', 'report', 'careNavigator', 'prescription'],
+    hr: ['hr', 'ohc'],
+};
 
 // allowed mime types and the extension the file is stored with, matches the accept= lists of the frontends
 const UPLOAD_MIME_TYPES = {
@@ -107,7 +113,7 @@ class DataService {
         });
     }
     
-    static async uploadFile(fileData, type) {
+    static async uploadFile(fileData, type, role = null) {
         // Validate input
         if (!fileData || typeof fileData !== 'string') {
             throw uploadError('File is required.');
@@ -115,6 +121,9 @@ class DataService {
 
         // only the folders the frontends upload into, never a client supplied path
         if (typeof type !== 'string' || !UPLOAD_TYPES.includes(type)) {
+            throw uploadError('Invalid file type.');
+        }
+        if (role && !(UPLOAD_TYPES_BY_ROLE[role] || []).includes(type)) {
             throw uploadError('Invalid file type.');
         }
 

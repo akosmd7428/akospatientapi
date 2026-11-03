@@ -269,7 +269,7 @@ const generatePrescription = async (data) => {
         //     const smsMessage = `Hi ${details.patient.name}, Your prescription from AkosMD is available for download here ${shortURL}.`
         //     await sendSms(details.patient.phone, smsMessage);
         // }
-        // await emailHelperSMTP(null, details.patient.email, ...Object.values(EmailTemplates.prescriptionReady({ name: details.patient.name, link: pdfLink })));                
+         await emailHelperSMTP(null, details.patient.email, ...Object.values(EmailTemplates.prescriptionReady({ name: details.patient.name, link: pdfLink })));                
 
         return true;
     } catch (error) {
