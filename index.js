@@ -71,8 +71,8 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // allowed browser origins, comma separated in CORS_ORIGINS
 // localhost origins are only allowed outside production
 const DEFAULT_CORS_ORIGINS = process.env.NODE_ENV === 'production'
-  ? 'https://carenavigator.akosmd.in,https://360.akosmd.in'
-  : 'https://carenavigator.akosmd.in,https://360.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
+  ? 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://carenavigator-staging.akosmd.in,https://connect-portal-staging.akosmd.in,https://connect-portal.akosmd.in'
+  : 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://carenavigator-staging.akosmd.in,https://connect-portal-staging.akosmd.in,https://connect-portal-staging.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
 const corsOptions = {
   origin: (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim()).filter(Boolean),
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',

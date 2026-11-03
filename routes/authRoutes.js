@@ -28,7 +28,7 @@ router.post('/decrypt', syncApiKeyAuth, AuthController.decryptDataSample);
 router.get('/getquery', syncApiKeyAuth, AuthController.getQueryStr);
 router.post('/ssologin', syncApiKeyAuth, AuthController.ssologin);
 router.post('/external-signup-old', syncApiKeyAuth, validateDataEncryption(), validateSchema(externalSignupSchema), AuthController.externalSignup);
-router.post('/login',validateSchema(loginSchema), AuthController.login);
+router.post('/login',validateDataEncryption(),validateSchema(loginSchema), AuthController.login);
 router.post('/sso-client-login', clientAuth, validateSchema(ssoClientLoginSchema), AuthController.ssoClientLogin);
 router.post('/sso-generate-code', ssoGenerateCodeAuth, validateDataEncryption(), validateSchema(ssoGenerateCodeSchema), AuthController.ssoGenerateCode);
 router.post('/sso-deeplink',clientAuth, jwtAuth, validateSchema(ssoDeeplinkSchema), AuthController.ssoDeeplink);

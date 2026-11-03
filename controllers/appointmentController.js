@@ -400,7 +400,10 @@ class AppointmentController {
             if(doctorIds.length > 0){
                 doctorDetails = await AppointmentService.fetchDoctorDetails(doctorIds);
             }else{
-                throw new Error("Currently, No doctor is available to connect.");
+                // throw new Error("Currently, No doctor is available to connect.");
+                // 4xx so the message is not stripped like 500 errors, the patient app shows errors/message in a toast
+                const noDoctorMessage = "Currently, No doctor is available to connect.";
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, noDoctorMessage, noDoctorMessage);
             }
             
             const response = {

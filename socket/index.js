@@ -26,8 +26,8 @@ const CHAT_ROLES = [ROLES.PATIENT, ROLES.DOCTOR, ROLES.CARE_NAVIGATOR];
 // same origins as the express cors config in index.js
 // localhost origins are only allowed outside production
 const DEFAULT_CORS_ORIGINS = process.env.NODE_ENV === 'production'
-  ? 'https://carenavigator.akosmd.in,https://360.akosmd.in'
-  : 'https://carenavigator.akosmd.in,https://360.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
+  ? 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://connect-portal-staging.akosmd.in/,https://connect-portal.akosmd.in/'
+  : 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://connect-portal-staging.akosmd.in/,https://connect-portal.akosmd.in/http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim()).filter(Boolean);
 
 const DENIED = { success: false, error: 'Access denied' };
@@ -84,7 +84,10 @@ const io = socket(httpServer, {
   // cors only covers polling, websocket upgrades from other browser origins are refused here
   allowRequest: (req, callback) => {
     const origin = req.headers.origin;
-    callback(null, !origin || CORS_ORIGINS.includes(origin));
+    const allowed = !origin || CORS_ORIGINS.includes(origin);
+    // a refused websocket upgrade reaches the browser only as "Unexpected response code: 400", add the origin to CORS_ORIGINS
+    if (!allowed) console.warn('socket origin not allowed:', origin);
+    callback(null, allowed);
   },
   // events only carry text and ids, chat files go through the http upload
   maxHttpBufferSize: 1e5,
