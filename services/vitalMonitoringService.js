@@ -132,9 +132,11 @@ class VitalMonitoringService {
                 v.id,  
                 hd.device_name, 
                 v.param_key_name,
-                v.param_value,               
-                DATE_FORMAT(v.createdAt, '%d-%m-%Y' ) AS date 
-            FROM 
+                v.param_value,
+                DATE_FORMAT(v.createdAt, '%d-%m-%Y' ) AS date,
+                DATE_FORMAT(v.createdAt, '%H:%i' ) AS time,
+                DATE_FORMAT(v.createdAt, '%Y-%m-%d %H:%i:%s' ) AS reading_time
+            FROM
                 vital_patient_monitoring AS v         
             JOIN 
                 health_checkup_device AS hd ON v.device_id = hd.id           
@@ -144,7 +146,7 @@ class VitalMonitoringService {
             if(from_date!='' && to_date!=''){
                 query +=` AND (v.createdAt BETWEEN :from_date AND DATE_ADD(:to_date, INTERVAL 1 DAY))`;
             }      
-            query +=` ORDER BY v.id ASC`;
+            query +=` ORDER BY v.createdAt ASC, v.id ASC`;
 
         // const replacements = { 
         //     patient_id,
@@ -167,19 +169,21 @@ class VitalMonitoringService {
             replacements,           
             type: QueryTypes.SELECT
         });
+        // one entry per reading, a reading is saved in one bulkCreate so its params share the same createdAt,
+        // several readings on the same date are kept as separate entries
         const result = [];
-        const map = {};      
+        const map = {};
 
         devicelist.forEach(item => {
-        const date = item.date;
         const key = item.param_key_name.trim(); // remove any trailing spaces
         const value = item.param_value;
 
-        if (!map[date]) {
-            map[date] = { date };
-            result.push(map[date]);
+        // a param already set for this time means a second reading saved in the same second
+        if (!map[item.reading_time] || key in map[item.reading_time]) {
+            map[item.reading_time] = { date: item.date, time: item.time };
+            result.push(map[item.reading_time]);
         }
-            map[date][key] = value;
+            map[item.reading_time][key] = value;
         });
         const device_name = devicelist[0]?.device_name || null;
         const device_id_ss = devicelist[0]?.device_id || null;
