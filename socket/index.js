@@ -26,9 +26,10 @@ const CHAT_ROLES = [ROLES.PATIENT, ROLES.DOCTOR, ROLES.CARE_NAVIGATOR];
 // same origins as the express cors config in index.js
 // localhost origins are only allowed outside production
 const DEFAULT_CORS_ORIGINS = process.env.NODE_ENV === 'production'
-  ? 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://connect-portal-staging.akosmd.in/,https://connect-portal.akosmd.in/'
-  : 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://connect-portal-staging.akosmd.in/,https://connect-portal.akosmd.in/http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim()).filter(Boolean);
+  ? 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://carenavigator-staging.akosmd.in,https://connect-portal-staging.akosmd.in,https://connect-portal.akosmd.in'
+  : 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://carenavigator-staging.akosmd.in,https://connect-portal-staging.akosmd.in,https://connect-portal.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
+// a browser origin never ends with "/", a trailing "/" in the list is removed so the origin still matches
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim().replace(/\/+$/, '')).filter(Boolean);
 
 const DENIED = { success: false, error: 'Access denied' };
 const INVALID = { success: false, error: 'Invalid request' };

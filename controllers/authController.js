@@ -2,6 +2,7 @@ const AuthService = require('../services/authService');
 const Patient = require('../models/patientModel');
 const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient');
 const SsoLoginCode = require('../models/ssoLoginCode');
+const SsoDeeplinkCode = require('../models/ssoDeeplinkCode');
 const { messages } = require('../config/language');
 const { STATUS_CODE, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH, SSO_DEEPLINK_PAGES } = require('../config/constant');
 const CommonHelper = require('../helpers/commonHelper');
@@ -19,6 +20,8 @@ const jwt = require('jsonwebtoken');
 
 // how long a generated sso login code can be used
 const SSO_CODE_EXPIRY_SECONDS = 300;
+// a deeplink login url works once and only for these few minutes
+const SSO_DEEPLINK_EXPIRY_SECONDS = 300;
 // purpose claim of the email verification link token, it is never a login token
 const EMAIL_VERIFY_PURPOSE = 'email_verification';
 // sso codes created by a care navigator (codeHash -> care navigator id), the login token then carries the act claim
@@ -262,7 +265,10 @@ class AuthController {
       const uuid = CommonHelper.generateUuidV4();
       // the client owns the authentication, there is no password to log in with so a random one is stored
       const hash_password = crypto.createHash('md5').update(CommonHelper.generateUuidV4()).digest('hex');
-      const createdPatientId = await PatientService.createSsoPatient(first_name, last_name, email, mobile || '', company_id, uuid, hash_password);
+      // const createdPatientId = await PatientService.createSsoPatient(first_name, last_name, email, mobile || '', company_id, uuid, hash_password);
+      // the patient's isProfileCompleted is 1 when the company has is_profile_complete_required = 1
+      const isProfileCompleted = Number(company.is_profile_complete_required) === 1 ? 1 : 0;
+      const createdPatientId = await PatientService.createSsoPatient(first_name, last_name, email, mobile || '', company_id, uuid, hash_password, isProfileCompleted);
 
       if (!createdPatientId) {
         return { error: { statusCode: STATUS_CODE.HTTP_400_BAD_REQUEST, message: "Unable to create the user." } };
@@ -281,6 +287,12 @@ class AuthController {
       return { error: { statusCode: STATUS_CODE.HTTP_404_NOT_FOUND, message: "No patient found with the provided email." } };
     }
 
+    // company has is_profile_complete_required = 1: an existing patient logging in again is also set to isProfileCompleted = 1
+    const companyProfileCompleted = Number(company.is_profile_complete_required) === 1 ? 1 : 0;
+    if (companyProfileCompleted === 1 && Number(patient.isProfileCompleted) !== 1) {
+      await patient.update({ isProfileCompleted: 1 });
+    }
+
     // the client's member_id is kept on the patient (new or existing), /sso-deeplink finds the member by it
     if (req.body.member_id) {
       await PatientService.setPatientMemberId(patient.id, req.body.member_id);
@@ -289,7 +301,8 @@ class AuthController {
     // dependants are created as family members of the patient, a failure here is logged and does not stop the login
     if (Array.isArray(req.body.dependants) && req.body.dependants.length > 0) {
       try {
-        await PatientService.createSsoDependants(patient, req.body.dependants, company.id);
+        // await PatientService.createSsoDependants(patient, req.body.dependants, company.id);
+        await PatientService.createSsoDependants(patient, req.body.dependants, company.id, companyProfileCompleted);
       } catch (error) {
         AuthController.logAuthError(error, req);
       }
@@ -346,12 +359,23 @@ class AuthController {
   // is sent, null for an unknown deeplink
   static getSsoDeeplinkUrl(deeplink) {
     const baseUrl = String(PATIENT_FRONTEND_URL || '').replace(/\/+$/, '');
+    const path = AuthController.getSsoDeeplinkPath(deeplink);
+    return path ? `${baseUrl}${path}` : null;
+  }
+
+  // frontend path for the sso deeplink, the dashboard when no deeplink is sent, null for an unknown deeplink
+  static getSsoDeeplinkPath(deeplink) {
     const value = String(deeplink || '').trim().toLowerCase();
     if (!value) {
-      return `${baseUrl}${SSO_DEFAULT_REDIRECT_PATH}`;
+      return SSO_DEFAULT_REDIRECT_PATH;
     }
-    const path = Object.prototype.hasOwnProperty.call(SSO_DEEPLINK_PAGES, value) ? SSO_DEEPLINK_PAGES[value] : null;
-    return path ? `${baseUrl}${path}` : null;
+    return Object.prototype.hasOwnProperty.call(SSO_DEEPLINK_PAGES, value) ? SSO_DEEPLINK_PAGES[value] : null;
+  }
+
+  // a stored deeplink path is only opened when its page is still one of the allowed deeplink pages
+  static isAllowedDeeplinkPath(redirectPath) {
+    const page = String(redirectPath || '').split('?')[0];
+    return page === SSO_DEFAULT_REDIRECT_PATH || Object.values(SSO_DEEPLINK_PAGES).includes(page);
   }
 
   // the login token (jwtAuth) is verified first, then the member_id is looked up in the patient table and has to be
@@ -373,9 +397,27 @@ class AuthController {
         return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, `Invalid deeplink, allowed values: ${allowedPages}`);
       }
 
-      const redirect_url = planId ? `${pageUrl}?plan_id=${encodeURIComponent(planId)}` : pageUrl;
+      // const redirect_url = planId ? `${pageUrl}?plan_id=${encodeURIComponent(planId)}` : pageUrl;
+      // the logged in patient (account holder of the member) has to belong to the api client's company
+      const accountHolder = await Patient.findOne({ where: { id: req.user.id } });
+      if (!req.apiClient || !await PatientService.isPatientOfClientCompany(accountHolder, req.apiClient.id)) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_403_FORBIDDEN, messages.sso_user_other_client);
+      }
+
+      // the url only carries a one time code (no login token), the page, company and member are kept on the server
+      // and checked again by /sso-deeplink-verify when the link is opened
+      const pagePath = AuthController.getSsoDeeplinkPath(deeplink);
+      const redirectPath = planId ? `${pagePath}?plan_id=${encodeURIComponent(planId)}` : pagePath;
+      const code = crypto.randomBytes(32).toString('hex');
+      const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+      const expiresAt = new Date(Date.now() + SSO_DEEPLINK_EXPIRY_SECONDS * 1000);
+      await SsoDeeplinkCode.create({ codeHash, patientId: member.id, companyId: req.apiClient.id, redirectPath, expiresAt });
+
+      const baseUrl = String(PATIENT_FRONTEND_URL || '').replace(/\/+$/, '');
+      const redirect_url = `${baseUrl}/deeplink?code=${code}`;
       return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.sso_deeplink_success, {
         redirect_url,
+        expires_in: SSO_DEEPLINK_EXPIRY_SECONDS,
         deeplink,
         member: {
           patient_id: member.id,
@@ -446,6 +488,48 @@ class AuthController {
       const actorId = ssoCodeActors.get(codeHash);
       ssoCodeActors.delete(codeHash);
       return await AuthController.ssoLoginResponse(res, patient, {}, actorId ? { act: 'careNavigator', actId: actorId } : {});
+    } catch (error) {
+      AuthController.logAuthError(error, req);
+      return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+    }
+  }
+
+  // exchange a one time deeplink code (/deeplink?code=) for the login token, the code works once, only before it
+  // expires, only while the member still belongs to the company that created it and only for the stored page
+  static async ssoDeeplinkVerify(req, res, next) {
+    try {
+      const codeHash = crypto.createHash('sha256').update(req.body.code).digest('hex');
+      const deeplinkCode = await SsoDeeplinkCode.findOne({ where: { codeHash } });
+      if (!deeplinkCode || deeplinkCode.usedAt || new Date(deeplinkCode.expiresAt) < new Date()) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_deeplink);
+      }
+
+      // mark the code as used, the usedAt check stops the same code being used by two requests at once
+      const [updatedRows] = await SsoDeeplinkCode.update({ usedAt: new Date() }, { where: { id: deeplinkCode.id, usedAt: null } });
+      if (updatedRows !== 1) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_deeplink);
+      }
+
+      const patient = await Patient.findOne({ where: { id: deeplinkCode.patientId } });
+      if (!patient || await AuthService.isPatientDisabled(patient.id)) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_deeplink);
+      }
+
+      // a dependant is checked through its account holder, the company must still be active and still own the patient
+      const accountHolder = patient.parent_id ? await Patient.findOne({ where: { id: patient.parent_id } }) : patient;
+      if (!await PatientService.isPatientOfClientCompany(accountHolder, deeplinkCode.companyId)) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_403_FORBIDDEN, messages.sso_user_other_client);
+      }
+
+      // the stored page is checked again, only a path on the patient frontend is returned
+      if (!AuthController.isAllowedDeeplinkPath(deeplinkCode.redirectPath)) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_deeplink);
+      }
+      const baseUrl = String(PATIENT_FRONTEND_URL || '').replace(/\/+$/, '');
+      return await AuthController.ssoLoginResponse(res, patient, {
+        redirect_path: deeplinkCode.redirectPath,
+        redirect_url: `${baseUrl}${deeplinkCode.redirectPath}`,
+      });
     } catch (error) {
       AuthController.logAuthError(error, req);
       return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);

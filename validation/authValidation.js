@@ -103,4 +103,9 @@ const ssoDeeplinkSchema = Joi.object({
   planId: Joi.string().trim().max(50).allow('', null).optional(),
 });
 
-module.exports = { registerSchema, loginSchema, loginPatientSchema,preEmpAddSchema,externalSignupSchema,ssoClientLoginSchema,ssoGenerateCodeSchema,ssoVerifyCodeSchema,ssoDeeplinkSchema };
+// the one time code of the /deeplink?code= url
+const ssoDeeplinkVerifySchema = Joi.object({
+  code: Joi.string().hex().length(64).required(),
+});
+
+module.exports = { registerSchema, loginSchema, loginPatientSchema,preEmpAddSchema,externalSignupSchema,ssoClientLoginSchema,ssoGenerateCodeSchema,ssoVerifyCodeSchema,ssoDeeplinkSchema,ssoDeeplinkVerifySchema };

@@ -1,7 +1,7 @@
 const express = require('express');
 const AuthController = require('../controllers/authController');
 const validateSchema = require('../middleware/validateSchema');
-const { registerSchema, loginSchema, externalSignupSchema, ssoClientLoginSchema, ssoGenerateCodeSchema, ssoVerifyCodeSchema, ssoDeeplinkSchema} = require('../validation/authValidation');
+const { registerSchema, loginSchema, externalSignupSchema, ssoClientLoginSchema, ssoGenerateCodeSchema, ssoVerifyCodeSchema, ssoDeeplinkSchema, ssoDeeplinkVerifySchema} = require('../validation/authValidation');
 const jwtAuth = require('../middleware/jwtAuth');
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
 const syncApiKeyAuth = require('../middleware/syncApiKeyAuth');
@@ -33,6 +33,7 @@ router.post('/sso-client-login', clientAuth, validateSchema(ssoClientLoginSchema
 router.post('/sso-generate-code', ssoGenerateCodeAuth, validateDataEncryption(), validateSchema(ssoGenerateCodeSchema), AuthController.ssoGenerateCode);
 router.post('/sso-deeplink',clientAuth, jwtAuth, validateSchema(ssoDeeplinkSchema), AuthController.ssoDeeplink);
 router.post('/sso-verify-code',validateDataEncryption(),validateSchema(ssoVerifyCodeSchema), AuthController.ssoVerifyCode);
+router.post('/sso-deeplink-verify',validateDataEncryption(),validateSchema(ssoDeeplinkVerifySchema), AuthController.ssoDeeplinkVerify);
 router.post('/external-signup',validateDataEncryption(),validateSchema(externalSignupSchema),AuthController.createUserBeforeEmailValidation);
 router.get('/verify-email-token',validateDataEncryption(),AuthController.verifyEmailPatient);
 module.exports = router;

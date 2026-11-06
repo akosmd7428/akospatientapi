@@ -118,6 +118,7 @@ const messages = {
     sso_invalid_code: "Invalid or expired SSO login code.",
     sso_member_not_found: "The member id does not belong to the logged in user.",
     sso_deeplink_success: "Redirect url generated successfully.",
+    sso_invalid_deeplink: "This link is invalid or has expired.",
     connect_code_generated: "Connect access code generated successfully.",
     connect_invalid_code: "Invalid or expired connect access code.",
     invaliddomain: "Domain is in-valid.",

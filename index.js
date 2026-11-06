@@ -56,6 +56,7 @@ const AUTH_PATHS = [
   '/api/auth/verify-email-token',
   '/api/auth/sso-client-login',
   '/api/auth/sso-verify-code',
+  '/api/auth/sso-deeplink-verify',
   '/api/auth/external-signup',
   '/api/forgot-password',
   '/api/connect-access/verify-code',
@@ -72,9 +73,10 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // localhost origins are only allowed outside production
 const DEFAULT_CORS_ORIGINS = process.env.NODE_ENV === 'production'
   ? 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://carenavigator-staging.akosmd.in,https://connect-portal-staging.akosmd.in,https://connect-portal.akosmd.in'
-  : 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://carenavigator-staging.akosmd.in,https://connect-portal-staging.akosmd.in,https://connect-portal-staging.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
+  : 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://carenavigator-staging.akosmd.in,https://connect-portal-staging.akosmd.in,https://connect-portal.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
 const corsOptions = {
-  origin: (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim()).filter(Boolean),
+  // a trailing "/" in the list is removed, a browser origin never ends with one
+  origin: (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim().replace(/\/+$/, '')).filter(Boolean),
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
   allowedHeaders: ['Content-Type', 'Authorization', 'role', 'companyId', 'x-sync-api-key','x-client-id','x-client-secret'],
 };

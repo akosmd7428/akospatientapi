@@ -1509,11 +1509,15 @@ class PatientService {
 
         return sequelizeDB1.transaction(async (transaction) => {
             // lock the parent row so two logins for the same new company cannot both create it
-            await sequelizeDB1.query('SELECT id FROM worksman_company_list WHERE id = :parent_id FOR UPDATE', {
+            // await sequelizeDB1.query('SELECT id FROM worksman_company_list WHERE id = :parent_id FOR UPDATE', {
+            // SELECT * so this still works on a database without the is_profile_complete_required column
+            const parentRows = await sequelizeDB1.query('SELECT * FROM worksman_company_list WHERE id = :parent_id FOR UPDATE', {
                 type: QueryTypes.SELECT,
                 replacements: { parent_id },
                 transaction
             });
+            // a new child company takes over the parent's is_profile_complete_required = 1
+            const isProfileCompleteRequired = parentRows[0] && Number(parentRows[0].is_profile_complete_required) === 1 ? 1 : 0;
 
             const existing = client_id
                 // any company with this employer_id, also inactive ones and the ones of other parents, the id must stay unique
@@ -1532,6 +1536,15 @@ class PatientService {
                 if (String(existing[0].parent_id) !== String(parent_id) || Number(existing[0].active) !== 1) {
                     return { error: 'client_not_under_parent' };
                 }
+                // an existing child company also takes over the parent's is_profile_complete_required = 1
+                if (isProfileCompleteRequired === 1 && Number(existing[0].is_profile_complete_required) !== 1) {
+                    await sequelizeDB1.query('UPDATE worksman_company_list SET is_profile_complete_required = 1 WHERE id = :id', {
+                        type: QueryTypes.UPDATE,
+                        replacements: { id: existing[0].id },
+                        transaction
+                    });
+                    existing[0].is_profile_complete_required = 1;
+                }
                 return { company: existing[0] };
             }
             if (!name) {
@@ -1540,7 +1553,11 @@ class PatientService {
 
             const employer_id = client_id ? String(client_id) : await PatientService.generateUniqueEmployerId(transaction);
             const [insertId] = await sequelizeDB1.query(
-                `INSERT INTO worksman_company_list (company_name, employer_id, parent_id, active) VALUES (:company_name, :employer_id, :parent_id, 1)`,
+                // `INSERT INTO worksman_company_list (company_name, employer_id, parent_id, active) VALUES (:company_name, :employer_id, :parent_id, 1)`,
+                // the column is only written when the parent has it set to 1, otherwise the column default is kept
+                isProfileCompleteRequired === 1
+                    ? `INSERT INTO worksman_company_list (company_name, employer_id, parent_id, active, is_profile_complete_required) VALUES (:company_name, :employer_id, :parent_id, 1, 1)`
+                    : `INSERT INTO worksman_company_list (company_name, employer_id, parent_id, active) VALUES (:company_name, :employer_id, :parent_id, 1)`,
                 {
                     type: QueryTypes.INSERT,
                     replacements: { company_name: name, employer_id, parent_id: String(parent_id) },
@@ -1566,8 +1583,10 @@ class PatientService {
 
     // create the dependants sent by an sso client as family members (parent_id) of the patient, in the patient's company,
     // a dependant whose email already exists is skipped, so the same list can be sent on every login
-    static async createSsoDependants(patient, dependants, fallbackCompanyId) {
+    // isProfileCompleted = 1 (company has is_profile_complete_required = 1) is set on new and existing dependants
+    static async createSsoDependants(patient, dependants, fallbackCompanyId, isProfileCompleted = 0) {
         const companyId = patient.companyId || patient.employer_id || fallbackCompanyId || null;
+        const profileCompleted = Number(isProfileCompleted) === 1 ? 1 : 0;
         const createdIds = [];
         for (const dependant of dependants) {
             const first_name = String(dependant.first_name || '').trim();
@@ -1580,14 +1599,24 @@ class PatientService {
                 continue;
             }
 
-            const existing = await Patient.findOne({ where: { email }, attributes: ['id', 'parent_id', 'companyId', 'employer_id'] });
+            // const existing = await Patient.findOne({ where: { email }, attributes: ['id', 'parent_id', 'companyId', 'employer_id'] });
+            const existing = await Patient.findOne({ where: { email }, attributes: ['id', 'parent_id', 'companyId', 'employer_id', 'isProfileCompleted'] });
             if (existing) {
                 // created on an earlier login, or the email belongs to another account which is never taken over
                 if (Number(existing.parent_id) !== Number(patient.id)) {
                     console.warn(`sso dependant skipped, email already used by patient ${existing.id}`);
-                } else if (companyId && (Number(existing.companyId) !== Number(companyId) || Number(existing.employer_id) !== Number(companyId))) {
-                    // a dependant of this patient always follows the patient's company
-                    await existing.update({ companyId, employer_id: companyId });
+                } else {
+                    const changes = {};
+                    if (companyId && (Number(existing.companyId) !== Number(companyId) || Number(existing.employer_id) !== Number(companyId))) {
+                        // a dependant of this patient always follows the patient's company
+                        Object.assign(changes, { companyId, employer_id: companyId });
+                    }
+                    if (profileCompleted === 1 && Number(existing.isProfileCompleted) !== 1) {
+                        changes.isProfileCompleted = 1;
+                    }
+                    if (Object.keys(changes).length) {
+                        await existing.update(changes);
+                    }
                 }
                 continue;
             }
@@ -1602,6 +1631,7 @@ class PatientService {
                 parent_id: patient.id,
                 companyId,
                 employer_id: companyId,
+                isProfileCompleted: profileCompleted,
             });
             if (dependant.member_id) {
                 await PatientService.setPatientMemberId(created.id, dependant.member_id);
@@ -1631,8 +1661,30 @@ class PatientService {
         );
         return rows[0] ? Patient.findOne({ where: { id: rows[0].id } }) : null;
     }
+    // true when the api client company is active and the patient belongs to it: the patient's company is that
+    // company or one of its child companies, or the patient is connected to it (connectedCompaniesPatient)
+    static async isPatientOfClientCompany(patient, clientCompanyId) {
+        const companyId = Number(clientCompanyId);
+        if (!patient || !companyId) return false;
+        const clientCompany = await sequelizeDB1.query(
+            'SELECT id FROM worksman_company_list WHERE id = :company_id AND active = 1 LIMIT 1',
+            { type: QueryTypes.SELECT, replacements: { company_id: companyId } }
+        );
+        if (!clientCompany[0]) return false;
+        const patientCompanyId = Number(patient.companyId || patient.employer_id) || 0;
+        if (patientCompanyId) {
+            const ownCompany = await sequelizeDB1.query(
+                'SELECT id FROM worksman_company_list WHERE id = :patient_company_id AND (id = :company_id OR parent_id = :company_id) LIMIT 1',
+                { type: QueryTypes.SELECT, replacements: { patient_company_id: patientCompanyId, company_id: companyId } }
+            );
+            if (ownCompany[0]) return true;
+        }
+        const connected = await ConnectedCompaniesPatient.findOne({ where: { patientEmail: patient.email, companyId } });
+        return Boolean(connected);
+    }
     // create patient for the sso client login (no email verification, identity is trusted by the client)
-    static async createSsoPatient(first_name, last_name, email, mobile, company_id, uuid, hash_password){
+    // isProfileCompleted is 1 when the company has is_profile_complete_required = 1
+    static async createSsoPatient(first_name, last_name, email, mobile, company_id, uuid, hash_password, isProfileCompleted = 0){
         const uniqueId = Math.floor(100000 + Math.random() * 900000).toString();
         const connectedUser = await ConnectedCompaniesPatient.findOne({ where: { patientEmail : email, companyId : company_id } });
 
@@ -1679,7 +1731,8 @@ class PatientService {
                             role = 'Patient',
                             password = :hash_password,
                             employer_id = :company_id,
-                            uniquePatientId = :uniqueId
+                            uniquePatientId = :uniqueId,
+                            isProfileCompleted = :isProfileCompleted
                         `;
 
         const replacements = {
@@ -1690,7 +1743,8 @@ class PatientService {
             last_name,
             uuid,
             hash_password,
-            uniqueId : connectedUser ? connectedUser.uniquePatientId : uniqueId
+            uniqueId : connectedUser ? connectedUser.uniquePatientId : uniqueId,
+            isProfileCompleted : Number(isProfileCompleted) === 1 ? 1 : 0
         };
 
         const [lastId] = await sequelizeDB1.query(query, {
