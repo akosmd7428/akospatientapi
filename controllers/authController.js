@@ -267,7 +267,9 @@ class AuthController {
       const hash_password = crypto.createHash('md5').update(CommonHelper.generateUuidV4()).digest('hex');
       // const createdPatientId = await PatientService.createSsoPatient(first_name, last_name, email, mobile || '', company_id, uuid, hash_password);
       // the patient's isProfileCompleted is 1 when the company has is_profile_complete_required = 1
-      const isProfileCompleted = Number(company.is_profile_complete_required) === 1 ? 1 : 0;
+      // const isProfileCompleted = Number(company.is_profile_complete_required) === 1 ? 1 : 0;
+      // a patient added by /sso-client-login always has isProfileCompleted = 1
+      const isProfileCompleted = 1;
       const createdPatientId = await PatientService.createSsoPatient(first_name, last_name, email, mobile || '', company_id, uuid, hash_password, isProfileCompleted);
 
       if (!createdPatientId) {
@@ -386,7 +388,7 @@ class AuthController {
       console.log("deep");
       const { member_id, first_name, last_name, mobile, email, gender, dob, deeplink, planId } = req.body;
 
-      const member = await PatientService.findMemberOfPatient(req.user.id, member_id);
+      const member = await PatientService.findMemberOfPatient(email, member_id);
       if (!member) {
         return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_403_FORBIDDEN, messages.sso_member_not_found);
       }
@@ -398,8 +400,9 @@ class AuthController {
       }
 
       // const redirect_url = planId ? `${pageUrl}?plan_id=${encodeURIComponent(planId)}` : pageUrl;
-      // the logged in patient (account holder of the member) has to belong to the api client's company
-      const accountHolder = await Patient.findOne({ where: { id: req.user.id } });
+      // the member (found by member_id + email) has to belong to the api client's company
+      // const accountHolder = await Patient.findOne({ where: { email: email,member_id:member_id } });
+      const accountHolder = member;
       if (!req.apiClient || !await PatientService.isPatientOfClientCompany(accountHolder, req.apiClient.id)) {
         return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_403_FORBIDDEN, messages.sso_user_other_client);
       }

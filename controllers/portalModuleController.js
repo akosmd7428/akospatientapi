@@ -8,7 +8,9 @@ class PortalModuleController {
     static async getActiveModules(req, res) {
         try {
             const modules = await PortalModuleService.getActiveModulesForPatient(req.user.id);
-            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { modules });
+            // return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { modules });
+            const company_settings = await PortalModuleService.getCompanySettingsForPatient(req.user.id);
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { modules, company_settings });
         } catch (error) {
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }

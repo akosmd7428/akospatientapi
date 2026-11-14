@@ -1652,12 +1652,12 @@ class PatientService {
             replacements: { member_id, id: Number(patientId) }
         });
     }
-    // the patient with this member_id when it is the logged in patient or one of its dependants (parent_id), null otherwise,
+    // the patient with this member_id and email (used by /sso-deeplink without a login token), null otherwise,
     // member_id is not in the Patient model yet so it is read directly
-    static async findMemberOfPatient(patientId, memberId) {
+    static async findMemberOfPatient(email, memberId) {
         const rows = await sequelizeDB1.query(
-            'SELECT id FROM patient WHERE member_id = :member_id AND (id = :patient_id OR parent_id = :patient_id) LIMIT 1',
-            { type: QueryTypes.SELECT, replacements: { member_id: String(memberId), patient_id: Number(patientId) } }
+            'SELECT id FROM patient WHERE member_id = :member_id AND (email = :email) LIMIT 1',
+            { type: QueryTypes.SELECT, replacements: { member_id: String(memberId), email: email } }
         );
         return rows[0] ? Patient.findOne({ where: { id: rows[0].id } }) : null;
     }

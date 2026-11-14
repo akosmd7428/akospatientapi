@@ -307,19 +307,25 @@ io.on("connection", (socket) => {
     if (!call) return reply(INVALID);
 
     const waitingList = await DataController.getTalkToDoctorCallList(me.id, call);
+   // console.log("wait",waitingList)
     const data = {
       waitingList
     };
+    //console.log("daata",data);
     // doctors come from the server, client connectDoctorIds/groupIds are ignored
     const { connectDoctorIds, groupIds } = await AppointmentService.fetchDoctorIds(me.id);
+   // console.log("connecte_doc",connectDoctorIds);
 
     connectDoctorIds.forEach((id, index) => {
+      console.log(data.waitingList[0]);
       if (data.waitingList[0] != undefined) {
         data.waitingList[0].group_id = groupIds[index];
         data.waitingList[0].pcp_doctor_id = id;
         data.waitingList[0].callHide = 0;
+       // console.log("room",connectRoom(id));
         // io.to(DOCTORS_ROOM).emit('incomingCallListFront', data);
         // patient details only go to the doctor the call is offered to
+       // console.log(data);
         io.to(connectRoom(id)).emit('incomingCallListFront', data);
       }
     });

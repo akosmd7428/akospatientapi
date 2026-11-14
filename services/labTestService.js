@@ -15,6 +15,7 @@ const axios = require('axios');
 const Razorpay = require('razorpay');
 const Patient = require('../models/patientModel');
 const NotificationService = require('./notificationService');
+const AcrossAssistService = require('./acrossAssistService');
 const { sendSms } = require('./smsService');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
 const EmailTemplates = require('../helpers/emailTemplates');
@@ -87,17 +88,23 @@ const safeEqual = (a, b) => {
 };
 
 class labTestService {
-    // companies the patient belongs to: own company plus the connected companies (a dependent uses the parent's)
+    // companies the patient belongs to, read from the patient table only: own companyId / employer_id
+    // (a dependent also uses the parent's companyId / employer_id)
     static async getPatientCompanyIds(patientId) {
         const patient = await Patient.findOne({ where: { id: patientId }, attributes: ['id', 'parent_id', 'companyId', 'employer_id'] });
         if (!patient) return [];
         const ownerIds = [patient.id];
         if (Number(patient.parent_id) > 0) ownerIds.push(patient.parent_id);
+        // const rows = await sequelizeDB1.query(
+        //     'SELECT companyId FROM connectedCompaniesPatient WHERE patientId IN (:ownerIds) AND isActive = 1',
+        //     { replacements: { ownerIds }, type: QueryTypes.SELECT }
+        // );
+        // return [patient.companyId, patient.employer_id, ...rows.map(row => row.companyId)]
         const rows = await sequelizeDB1.query(
-            'SELECT companyId FROM connectedCompaniesPatient WHERE patientId IN (:ownerIds) AND isActive = 1',
+            'SELECT companyId, employer_id FROM patient WHERE id IN (:ownerIds)',
             { replacements: { ownerIds }, type: QueryTypes.SELECT }
         );
-        return [patient.companyId, patient.employer_id, ...rows.map(row => row.companyId)]
+        return rows.flatMap(row => [row.companyId, row.employer_id])
             .map(id => parseInt(id, 10))
             .filter((id, index, list) => Number.isInteger(id) && id > 0 && list.indexOf(id) === index);
     }
@@ -2260,6 +2267,16 @@ WHERE
             this.notifyCareNavigators(patient, emailData, isConfirmed ? 'confirmed' : 'review')
                 .catch((err) => console.error('Care navigator notification failed:', err));
 
+            // lab test booked (Payment Completed) or confirmed: the Across Assist webhook is called when the patient's
+            // company has is_call_webhook = 1, only when the status changed (a repeated payment callback is not sent again),
+            // not awaited so the partner api cannot slow down the booking response
+            if (orderDetailPrev && orderDetailPrev.orderStatus !== status) {
+                // AcrossAssistService.sendLabOrderWebhook(orderId);
+                // AcrossAssistService.sendWebhook(AcrossAssistService.SOURCES.LAB_TEST, orderId);
+                // the new order status (Payment Completed / confirmed) is stored as the event in webhook_logs
+                AcrossAssistService.sendWebhook(AcrossAssistService.SOURCES.LAB_TEST, orderId, status);
+            }
+
         }
         if(status == "cancelled"){ // Send Notifications
             const emailData = await this.getHealthCheckupEmailData(orderDetail, patient);
@@ -3636,6 +3653,14 @@ WHERE
             replacements: { paymentStatus,status,orderId },
             type: QueryTypes.UPDATE
         });
+
+        // talk to doctor call (call_type 1) paid: the Across Assist webhook is called when the patient's company has
+        // is_call_webhook = 1, only the first time it becomes Paid, not awaited so it cannot slow down the response
+        // (call_type 2 is an appointment payment, the appointment booking sends its own webhook)
+        if (orderDetail && Number(orderDetail.call_type) === 1 && paymentStatus === 'Paid' && orderDetail.payment_status !== 'Paid') {
+            // AcrossAssistService.sendWebhook(AcrossAssistService.SOURCES.TALK_TO_DOCTOR, orderId);
+            AcrossAssistService.sendWebhook(AcrossAssistService.SOURCES.TALK_TO_DOCTOR, orderId, 'payment_paid');
+        }
 
 
         // update payment status

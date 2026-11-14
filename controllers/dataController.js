@@ -255,7 +255,7 @@ class DataController {
                 FROM connect_waiting_room 
                 JOIN connect_call_log ON connect_call_log.call_id = connect_waiting_room.call_id 
                 JOIN patient ON patient.id = connect_waiting_room.patient_id 
-                JOIN patientDetails ON patientDetails.patientId = patient.id 
+                LEFT JOIN patientDetails ON patientDetails.patientId = patient.id 
                 WHERE (connect_waiting_room.patient_id = :patientId)
                 AND (connect_waiting_room.call_id = :call_id)
                 AND (connect_waiting_room.status IN ("waiting","In progress", "PENDING", "IN CONSULTATION")) 

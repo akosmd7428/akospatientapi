@@ -32,6 +32,9 @@ const SMTP_SENDER_FROM = process.env.SMTP_SENDER_FROM;
 const REDCLIFF_BASE_URL = process.env.REDCLIFF_URL;
 const REDCLIFF_COOKIE = process.env.REDCLIFF_COOKIE;
 const REDCLIFF_KEY = process.env.REDCLIFF_KEY;
+// Across Assist partner api (appointment confirmation), the base url defaults to https://health.acrossassist.in
+const ACROSS_ASSIST_BASE_URL = process.env.ACROSS_ASSIST_BASE_URL;
+const ACROSS_ASSIST_API_KEY = process.env.ACROSS_ASSIST_API_KEY;
 
 // encryption keys and tokens, never hard-code these in the code
 const DATA_ENCRYPTION_KEY = process.env.DATA_ENCRYPTION_KEY;
@@ -88,6 +91,8 @@ module.exports = {
     REDCLIFF_BASE_URL,
     REDCLIFF_COOKIE,
     REDCLIFF_KEY,
+    ACROSS_ASSIST_BASE_URL,
+    ACROSS_ASSIST_API_KEY,
     DATA_ENCRYPTION_KEY,
     DATA_ENCRYPTION_IV,
     AES_SECRET_KEY,

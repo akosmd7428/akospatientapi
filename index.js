@@ -29,6 +29,7 @@ const vitalMonitoringRoutes = require('./routes/vitalMonitoringRoutes');
 const migrationRoutes = require('./routes/migrationRoutes');
 const connectAccessRoutes = require('./routes/connectAccessRoutes');
 const portalModuleRoutes = require('./routes/portalModuleRoutes');
+const acrossAssistRoutes = require('./routes/acrossAssistRoutes');
 const initSocket = require('./socket');
 const cors = require('cors');
 
@@ -131,6 +132,7 @@ app.use('/api/vital-monitoring', vitalMonitoringRoutes);
 app.use('/api/migration', migrationRoutes);
 app.use('/api/connect-access', connectAccessRoutes);
 app.use('/api/portal-modules', portalModuleRoutes);
+app.use('/api/across-assist', acrossAssistRoutes);
 
 // uploaded files, served as downloads so an uploaded html/svg can never run in the api origin
 app.use('/assets', express.static(path.join(__dirname, 'assets'), {

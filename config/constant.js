@@ -28,7 +28,8 @@ const SSO_DEFAULT_REDIRECT_PATH = '/dashboard';
 // compared lower case without surrounding spaces
 const SSO_DEEPLINK_PAGES = {
     client_talk_to_doctor: '/TalkToDoctor',
-    client_lab_test: '/LabTests',
+    // client_lab_test: '/LabTests',
+    client_lab_test: '/LabTests/Book',
     client_book_appointment: '/MyAppointments/book',
     client_pharmacy_avail: '/MyMedicine',
 };

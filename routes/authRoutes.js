@@ -31,7 +31,7 @@ router.post('/external-signup-old', syncApiKeyAuth, validateDataEncryption(), va
 router.post('/login',validateDataEncryption(),validateSchema(loginSchema), AuthController.login);
 router.post('/sso-client-login', clientAuth, validateSchema(ssoClientLoginSchema), AuthController.ssoClientLogin);
 router.post('/sso-generate-code', ssoGenerateCodeAuth, validateDataEncryption(), validateSchema(ssoGenerateCodeSchema), AuthController.ssoGenerateCode);
-router.post('/sso-deeplink',clientAuth, jwtAuth, validateSchema(ssoDeeplinkSchema), AuthController.ssoDeeplink);
+router.post('/sso-deeplink',clientAuth,  validateSchema(ssoDeeplinkSchema), AuthController.ssoDeeplink);
 router.post('/sso-verify-code',validateDataEncryption(),validateSchema(ssoVerifyCodeSchema), AuthController.ssoVerifyCode);
 router.post('/sso-deeplink-verify',validateDataEncryption(),validateSchema(ssoDeeplinkVerifySchema), AuthController.ssoDeeplinkVerify);
 router.post('/external-signup',validateDataEncryption(),validateSchema(externalSignupSchema),AuthController.createUserBeforeEmailValidation);

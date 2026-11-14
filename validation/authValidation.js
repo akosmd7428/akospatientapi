@@ -96,7 +96,9 @@ const ssoDeeplinkSchema = Joi.object({
   first_name: Joi.string().trim().max(100).allow('', null).optional(),
   last_name: Joi.string().trim().max(100).allow('', null).optional(),
   mobile: Joi.string().trim().max(20).allow('', null).optional(),
-  email: Joi.string().trim().email().allow('', null).optional(),
+  // email: Joi.string().trim().email().allow('', null).optional(),
+  // the member is verified by member_id + email (no login token), so the email is required
+  email: Joi.string().trim().email().required(),
   gender: Joi.string().trim().max(20).allow('', null).optional(),
   dob: Joi.string().trim().max(20).allow('', null).optional(),
   deeplink: Joi.string().trim().max(500).allow('', null).optional(),

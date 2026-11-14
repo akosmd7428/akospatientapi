@@ -31,7 +31,16 @@ class AppointmentController {
                is_paid
             };
 
-            await AppointmentService.checkAppointment(patientId, doctorId, date, time,is_paid);
+            // await AppointmentService.checkAppointment(patientId, doctorId, date, time,is_paid);
+            const existing = await AppointmentService.checkAppointment(patientId, doctorId, date, time,is_paid);
+            // already booked with this doctor at this date and time: only the message, no error and no new booking
+            if (existing && existing.alreadyExists) {
+                return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'An appointment already exists', { appointment: existing.appointment, alreadyExists: true });
+            }
+            // another doctor is already booked at this date and time: only the message, no error and no new booking
+            if (existing && existing.existsWithOtherDoctor) {
+                return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'An appointment exists with a different doctor.', { appointment: existing.appointment, existsWithOtherDoctor: true });
+            }
             const appointment = await AppointmentService.bookAppointment(appointmentData);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.appointmentBooked, { appointment });
         } catch (error) {
@@ -44,6 +53,12 @@ class AppointmentController {
             const { doctorId, date, time, is_paid} = req.body;
             const patientId = req.user.id;
             const rn = await AppointmentService.checkAppointment(patientId, doctorId, date, time,is_paid);
+            if (rn && rn.alreadyExists) {
+                return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'An appointment already exists', { alreadyExists: true });
+            }
+            if (rn && rn.existsWithOtherDoctor) {
+                return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'An appointment exists with a different doctor.', { existsWithOtherDoctor: true });
+            }
             if(rn === 1){
                  return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.noAppointmentsFound, {  });
             }
@@ -414,19 +429,19 @@ class AppointmentController {
                     email: patientDetails.email,
                     phone: patientDetails.phone,
                     uuid: patientDetails.uuid,
-                    profilePic: patientDetail.profilePic,
+                   
                     age: patientDetails.age,
-                    height: patientDetail.height,
-                    weight: patientDetail.weight,
+                  //  height: patientDetail.height,
+                  //  weight: patientDetail.weight,
                     dateofbirth: patientDetails.dateofbirth,
                     gender: patientDetails.gender,
                     location: patientDetails.city+', '+patientDetails.state,
-                    bloodGroup: patientDetail.bloodgroup,
-                    symptoms: patientDetail.symptoms,
-                    vaccinations: patientDetail.vaccinations,
-                    medications: patientDetail.medications,
-                    medical_allergies: patientDetail.medical_allergies,
-                    health_problems: patientDetail.health_problems   
+                  //  bloodGroup: patientDetail.bloodgroup,
+                  // symptoms: patientDetail.symptoms,
+                  //  vaccinations: patientDetail.vaccinations,
+                  //  medications: patientDetail.medications,
+                  //  medical_allergies: patientDetail.medical_allergies,
+                   // health_problems: patientDetail.health_problems   
                 },
                 doctorDetails:doctorDetails,
                 doctorCallData: data,
