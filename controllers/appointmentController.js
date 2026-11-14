@@ -276,6 +276,10 @@ class AppointmentController {
             if (!appointmentDetails) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.noAppointmentsFound);
             }
+            const healthDetails = await VitalMonitoringService.getPatientDeviceRating(patientId); 
+            const bloodPressureSystolic = healthDetails.systolic?healthDetails.systolic:'--';
+            const bloodPressureDiastolic = healthDetails.diastolic?healthDetails.diastolic:'--'
+            const bloodPresure = bloodPressureSystolic+ " / "+bloodPressureDiastolic;
 
             // if (!appointmentDetails) {
             //     return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.serverError, "Appointment not found");
@@ -300,12 +304,20 @@ class AppointmentController {
                     location: appointmentDetails.city+', '+appointmentDetails.state,
                     bloodGroup: appointmentDetails.bloodgroup
                 },
-                healthDetails: {
-                    overAllHealthScore: "98",
-                    sugar: "90",
-                    heartRate: "72",
-                    temperature: "98` F",
-                    bloodPressure: "115/80"
+                // healthDetails: {
+                //     overAllHealthScore: "98",
+                //     sugar: "90",
+                //     heartRate: "72",
+                //     temperature: "98` F",
+                //     bloodPressure: "115/80"
+                // },
+                 healthDetails: {
+                    overAllHealthScore: "--",
+                    sugar: healthDetails.sugar?healthDetails.sugar:'--',
+                    heartRate: healthDetails.heartRate?healthDetails.heartRate:'--',
+                    temperature: healthDetails.temperature?healthDetails.temperature:'--',
+                    bloodPressure: bloodPresure,
+                   // bloodPressureDiastolic: healthDetails.diastolic?healthDetails.diastolic:'--'
                 },
                 prescriptionURL: appointmentDetails.prescriptionURL,
                 connectCallLog: {
