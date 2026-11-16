@@ -8,7 +8,7 @@ const  validateDataEncryption  = require('../middleware/validateDataEncryption')
 const router = express.Router();
 
 // faq is shown in the patient and care navigator portals
-router.get('/faq',validateDataEncryption(), authorize(ROLES.PATIENT, ROLES.CARE_NAVIGATOR), HelpController.getHelpFaq);
-router.post('/send-email',validateDataEncryption(), jwtAuth, validateSchema(sendMessageValidation), HelpController.sendEmail);
+router.get('/faq', authorize(ROLES.PATIENT, ROLES.CARE_NAVIGATOR), validateDataEncryption(), HelpController.getHelpFaq);
+router.post('/send-email', jwtAuth, validateDataEncryption(), validateSchema(sendMessageValidation), HelpController.sendEmail);
 
 module.exports = router;

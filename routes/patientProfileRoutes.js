@@ -14,12 +14,12 @@ const careNavigatorScope = (req, res, next) => (
     req.user.role === ROLES.CARE_NAVIGATOR ? loadCareNavigatorScope(req, res, next) : next()
 );
 
-router.get('/profile',validateDataEncryption(),jwtAuth, PatientController.getPatientProfileDetails);
-router.post('/profile',validateDataEncryption(), jwtAuth, PatientController.createOrUpdateProfile);
+router.get('/profile', jwtAuth, validateDataEncryption(), PatientController.getPatientProfileDetails);
+router.post('/profile', jwtAuth, validateDataEncryption(), PatientController.createOrUpdateProfile);
 // pre-login check on the patient login page, returns only a status message (no patient data)
 router.get('/details/:patientEmail',validateDataEncryption(), PatientController.getPatientDetails);
-router.post('/updateProfile',validateDataEncryption(), authorize(ROLES.PATIENT, ROLES.CARE_NAVIGATOR), careNavigatorScope, PatientController.updateProfile);
-router.get('/patientSignIn',validateDataEncryption(), jwtAuth, PatientController.patientSignIn);
-router.post('/notes',validateDataEncryption(), jwtAuth, PatientController.updateNotes);
+router.post('/updateProfile', authorize(ROLES.PATIENT, ROLES.CARE_NAVIGATOR), validateDataEncryption(), careNavigatorScope, PatientController.updateProfile);
+router.get('/patientSignIn', jwtAuth, validateDataEncryption(), PatientController.patientSignIn);
+router.post('/notes', jwtAuth, validateDataEncryption(), PatientController.updateNotes);
 
 module.exports = router;

@@ -14,6 +14,7 @@ const HelpService = require('../services/helpService');
 const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
 const EmailTemplates = require('../helpers/emailTemplates');
 const AuthService = require('../services/authService');
+const { loginTokenOptions } = require('../middleware/authorize');
 const Prescription = require('../models/prescription');
 const PatientFolder = require('../models/patientFoldersModel');
 const Doctor = require('../models/doctorModel');
@@ -558,7 +559,7 @@ class CareNavigatorController {
             const token = jwt.sign(
                 { id: patient.id, email: patient.email, role: 'patient', act: 'careNavigator', actId: req.user.id },
                 JWT_SECRET,
-                { expiresIn: '2h', algorithm: 'HS256' }
+                loginTokenOptions('2h')
             );
             // audit trail, ids only
             console.info(`[audit] careNavigator ${req.user.id} logged in as patient ${patient.id}`);

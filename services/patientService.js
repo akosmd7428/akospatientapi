@@ -438,8 +438,9 @@ class PatientService {
     //     }
     // }
 
-    // unused: nothing calls this any more (profile images come from /data/upload), and it is not safe to call,
-    // the extension and type are written into the file name unchecked and the content type is never validated
+    // unused: nothing calls this any more (profile images come from /data/upload)
+    // extension and type never reach the file path as given: the extension must be on the allow list and the
+    // type is reduced to letters and digits, so a value like '../../index.js' cannot write outside assets/
     static async saveImage(buffer, extension, type) {
         try {
             if (!buffer) throw new Error("No image data provided");
@@ -447,12 +448,14 @@ class PatientService {
             // Extract the image extension from MIME type
             // const extension = mimeType.split('/')[1];
             if (!extension) throw new Error("Unable to determine file extension");
+            const safeExtension = String(extension).toLowerCase();
+            if (!['jpg', 'jpeg', 'png', 'pdf'].includes(safeExtension)) throw new Error("File type not allowed");
+            const safeType = String(type).replace(/[^a-z0-9]/gi, '') || 'file';
 
             // Generate file paths
             const year = new Date().getFullYear();
             const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
-            const timestamp = Date.now();
-            const fileName = `${type}_${timestamp}.${extension}`;
+            const fileName = `${safeType}_${crypto.randomBytes(16).toString('hex')}.${safeExtension}`;
             const dir = path.join(__dirname, '..', 'assets', year.toString(), month);
             const filePath = path.join(dir, fileName);
             const filePathFinal = `${PATIENT_BACKEND_URL}/assets/${year}/${month}/${fileName}`;

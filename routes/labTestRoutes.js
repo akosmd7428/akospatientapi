@@ -29,55 +29,55 @@ const verifyRedcliffWebhook = (req, res, next) => {
     next();
 };
 
-router.get('/packages-and-tests',validateDataEncryption(),jwtAuth, LabTestController.getPackagesAndTests);
-router.post('/upload',validateDataEncryption(),jwtAuth, validateSchema(uploadPrescriptionSchema), LabTestController.uploadPrescription);
-router.post('/addToCart',validateDataEncryption(),jwtAuth, validateSchema(addToCartSchema), LabTestController.addToCart);
-router.get('/cities',validateDataEncryption(), jwtAuth, LabTestController.getAllActiveCities);
-router.post('/cart/details',validateDataEncryption(),jwtAuth, LabTestController.getCartDetailsByPatientId);
-router.post('/cart/lab-details',validateDataEncryption(), jwtAuth, LabTestController.getLabDetailsByCart);
-router.post('/branches',validateDataEncryption(),jwtAuth, LabTestController.getBranchesByLabAndCity);
-router.post('/tests-and-packages',validateDataEncryption(), jwtAuth, LabTestController.getTestsAndPackagesByLab);
-router.post('/test-or-package-details',validateDataEncryption(), jwtAuth, LabTestController.getTestOrPackageDetails);
-router.delete('/remove/:cartId',validateDataEncryption(), jwtAuth, LabTestController.removeCartItem);
-router.get('/prescription/:patientId',validateDataEncryption(), patientOrCareNavigator, LabTestController.getPrescriptionUrl);
+router.get('/packages-and-tests', jwtAuth, validateDataEncryption(), LabTestController.getPackagesAndTests);
+router.post('/upload', jwtAuth, validateDataEncryption(), validateSchema(uploadPrescriptionSchema), LabTestController.uploadPrescription);
+router.post('/addToCart', jwtAuth, validateDataEncryption(), validateSchema(addToCartSchema), LabTestController.addToCart);
+router.get('/cities', jwtAuth, validateDataEncryption(), LabTestController.getAllActiveCities);
+router.post('/cart/details', jwtAuth, validateDataEncryption(), LabTestController.getCartDetailsByPatientId);
+router.post('/cart/lab-details', jwtAuth, validateDataEncryption(), LabTestController.getLabDetailsByCart);
+router.post('/branches', jwtAuth, validateDataEncryption(), LabTestController.getBranchesByLabAndCity);
+router.post('/tests-and-packages', jwtAuth, validateDataEncryption(), LabTestController.getTestsAndPackagesByLab);
+router.post('/test-or-package-details', jwtAuth, validateDataEncryption(), LabTestController.getTestOrPackageDetails);
+router.delete('/remove/:cartId', jwtAuth, validateDataEncryption(), LabTestController.removeCartItem);
+router.get('/prescription/:patientId', patientOrCareNavigator, validateDataEncryption(), LabTestController.getPrescriptionUrl);
 router.delete('/prescription/:prescriptionId', patientOrCareNavigator, LabTestController.deletePrescription);
-router.post('/order',validateDataEncryption(),jwtAuth, LabTestController.createLabOrder);
+router.post('/order', jwtAuth, validateDataEncryption(), LabTestController.createLabOrder);
 router.get('/orders/:orderId', jwtAuth, LabTestController.getLabOrdersByPatient);
-router.put('/order/reschedule',validateDataEncryption(), jwtAuth, LabTestController.rescheduleLabOrder);
-router.put('/order',validateDataEncryption(),jwtAuth, LabTestController.updateLabOrder);
-router.get('/list/:patientId',validateDataEncryption(), jwtAuth, LabTestController.getLabOrders);
-router.delete('/cartRemove/:cartId',validateDataEncryption(), jwtAuth, LabTestController.removeCart);
-router.put('/cart',validateDataEncryption(), jwtAuth, LabTestController.updateLabId);
-router.get('/labDetail/:cartId',validateDataEncryption(), jwtAuth, LabTestController.getLabDetail);
-router.get('/cart/sub-city-prices/:cartId',validateDataEncryption(), jwtAuth, LabTestController.getSubCityCartPrices);
-router.post('/purchaseLabTest',validateDataEncryption(), jwtAuth, LabTestController.purchaseLabTest);
-router.post('/purchaseLabTestMobile',validateDataEncryption(), jwtAuth, LabTestController.purchaseLabTestMobile);
+router.put('/order/reschedule', jwtAuth, validateDataEncryption(), LabTestController.rescheduleLabOrder);
+router.put('/order', jwtAuth, validateDataEncryption(), LabTestController.updateLabOrder);
+router.get('/list/:patientId', jwtAuth, validateDataEncryption(), LabTestController.getLabOrders);
+router.delete('/cartRemove/:cartId', jwtAuth, validateDataEncryption(), LabTestController.removeCart);
+router.put('/cart', jwtAuth, validateDataEncryption(), LabTestController.updateLabId);
+router.get('/labDetail/:cartId', jwtAuth, validateDataEncryption(), LabTestController.getLabDetail);
+router.get('/cart/sub-city-prices/:cartId', jwtAuth, validateDataEncryption(), LabTestController.getSubCityCartPrices);
+router.post('/purchaseLabTest', jwtAuth, validateDataEncryption(), LabTestController.purchaseLabTest);
+router.post('/purchaseLabTestMobile', jwtAuth, validateDataEncryption(), LabTestController.purchaseLabTestMobile);
 
 router.post('/labtestnotification', jwtAuth, LabTestController.labtestNotification);
-router.post('/re-schedule-lab',validateDataEncryption(), patientOrCareNavigator, LabTestController.labReschedule);
+router.post('/re-schedule-lab', patientOrCareNavigator, validateDataEncryption(), LabTestController.labReschedule);
 
-router.post('/paymentStatus',validateDataEncryption(), jwtAuth, LabTestController.paymentStatus);
+router.post('/paymentStatus', jwtAuth, validateDataEncryption(), LabTestController.paymentStatus);
 // no login on the razorpay callback, the controller verifies the razorpay signature
 router.post('/paymentStatusMobile',validateDataEncryption(), LabTestController.paymentStatusMobile);
 
-router.put('/updateAddress',validateDataEncryption(), jwtAuth, LabTestController.updateAddress);
-router.get('/getLabTestAddress',validateDataEncryption(), jwtAuth, LabTestController.getLabTestAddress);
+router.put('/updateAddress', jwtAuth, validateDataEncryption(), LabTestController.updateAddress);
+router.get('/getLabTestAddress', jwtAuth, validateDataEncryption(), LabTestController.getLabTestAddress);
 
 // redcliff get aloc number
-router.get('/getRedcliffAloc',validateDataEncryption(), jwtAuth, LabTestController.getRedcliffAloc);
-router.post('/getRedcliffSlot',validateDataEncryption(), jwtAuth, LabTestController.getBookingSlot);
-router.post('/createRedcliffBooking',validateDataEncryption(), jwtAuth, LabTestController.createRedcliffBooking);
+router.get('/getRedcliffAloc', jwtAuth, validateDataEncryption(), LabTestController.getRedcliffAloc);
+router.post('/getRedcliffSlot', jwtAuth, validateDataEncryption(), LabTestController.getBookingSlot);
+router.post('/createRedcliffBooking', jwtAuth, validateDataEncryption(), LabTestController.createRedcliffBooking);
 router.post('/redCliffReport', verifyRedcliffWebhook, LabTestController.redCliffReport);
 router.post('/fetchRedcliffReport', verifyRedcliffWebhook, LabTestController.getRedcliffReport);
 
-router.get('/sub-cities/:cityId',validateDataEncryption(), jwtAuth,LabTestController.getSubCitiesByCityId);
-router.get('/patient-company-details',validateDataEncryption(), jwtAuth,LabTestController.getPatientCompanyDetails);
-router.get('/check-payment-status',validateDataEncryption(), jwtAuth,LabTestController.checkCallPaymentStatus);
-router.post('/create-payment-call',validateDataEncryption(), jwtAuth,LabTestController.postPaymentCall);
-router.post('/verify-call-coupon',validateDataEncryption(), jwtAuth,LabTestController.verifyCallCoupan);
-router.post('/paymentStatusCallCheck',validateDataEncryption(), jwtAuth,LabTestController.paymentStatusCallCheck);
+router.get('/sub-cities/:cityId', jwtAuth, validateDataEncryption(),LabTestController.getSubCitiesByCityId);
+router.get('/patient-company-details', jwtAuth, validateDataEncryption(),LabTestController.getPatientCompanyDetails);
+router.get('/check-payment-status', jwtAuth, validateDataEncryption(),LabTestController.checkCallPaymentStatus);
+router.post('/create-payment-call', jwtAuth, validateDataEncryption(),LabTestController.postPaymentCall);
+router.post('/verify-call-coupon', jwtAuth, validateDataEncryption(),LabTestController.verifyCallCoupan);
+router.post('/paymentStatusCallCheck', jwtAuth, validateDataEncryption(),LabTestController.paymentStatusCallCheck);
 
-router.post('/cart/unpaid-lab-details',validateDataEncryption(),jwtAuth, LabTestController.getUnpaidLabForItem);
+router.post('/cart/unpaid-lab-details', jwtAuth, validateDataEncryption(), LabTestController.getUnpaidLabForItem);
 //router.post('/check-lab-code',validateDataEncryption(),jwtAuth, LabTestController.getLabItemWithCode);
 
 

@@ -6,8 +6,8 @@ const { patientAssessmentSchema } = require('../validation/patientAssessmentVali
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
 const router = express.Router();
 
-router.get('/',validateDataEncryption(), jwtAuth, PatientAssessmentController.getPatientAssessments);
-router.post('/',validateDataEncryption(),jwtAuth,  validateSchema(patientAssessmentSchema), PatientAssessmentController.createPatientAssessment);
-router.post('/bulk',validateDataEncryption(), jwtAuth, PatientAssessmentController.createPatientAssessments);
+router.get('/', jwtAuth, validateDataEncryption(), PatientAssessmentController.getPatientAssessments);
+router.post('/', jwtAuth, validateDataEncryption(),  validateSchema(patientAssessmentSchema), PatientAssessmentController.createPatientAssessment);
+router.post('/bulk', jwtAuth, validateDataEncryption(), PatientAssessmentController.createPatientAssessments);
 
 module.exports = router;

@@ -1,5 +1,10 @@
 // Secret keys and environment variables
 const JWT_SECRET = process.env.JWT_SECRET;
+// login tokens: always HS256, always carry the issuer of the api that signed them
+// doctor tokens are signed by doctorportalapi with the same secret, its default issuer is 'akosmd-doctorportalapi'
+const JWT_ALGORITHM = 'HS256';
+const JWT_ISSUER = process.env.JWT_ISSUER || 'akosmd-patientportalapi';
+const DOCTOR_JWT_ISSUER = process.env.DOCTOR_JWT_ISSUER || 'akosmd-doctorportalapi';
 const DEV_SENDGRID_API_KEY = process.env.DEV_SENDGRID_API_KEY;
 const SEND_CONTACT_EMAIL_TO_ADMIN = process.env.SEND_CONTACT_EMAIL_TO_ADMIN;
 const SENDER_FROM = process.env.SENDER_FROM;
@@ -59,8 +64,11 @@ const APPOINTMENT_STATUS = {
 };
 
 module.exports = { 
-    JWT_SECRET, 
-    SENDER_FROM, 
+    JWT_SECRET,
+    JWT_ALGORITHM,
+    JWT_ISSUER,
+    DOCTOR_JWT_ISSUER,
+    SENDER_FROM,
     SEND_CONTACT_EMAIL_TO_ADMIN, 
     DEV_SENDGRID_API_KEY, 
     DB_HOST1, 

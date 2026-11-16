@@ -4,6 +4,6 @@ const PortalModuleController = require('../controllers/portalModuleController');
 const jwtAuth = require('../middleware/jwtAuth');
 const validateDataEncryption = require('../middleware/validateDataEncryption');
 
-router.get('/active', validateDataEncryption(), jwtAuth, PortalModuleController.getActiveModules);
+router.get('/active', jwtAuth, validateDataEncryption(), PortalModuleController.getActiveModules);
 
 module.exports = router;

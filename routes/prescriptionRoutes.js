@@ -6,9 +6,9 @@ const { authorize, ROLES } = require('../middleware/authorize');
 const router = express.Router();
 
 // prescription writing is a doctor action, the doctor token is issued by doctorportalapi
-router.post('/prescription/detail',validateDataEncryption(), authorize(ROLES.DOCTOR), PatientController.savePrescriptionDetails);
+router.post('/prescription/detail', authorize(ROLES.DOCTOR), validateDataEncryption(), PatientController.savePrescriptionDetails);
 // router.post('/prescription/medication', PatientController.savePrescriptionMedication);
-router.get('/prescription',validateDataEncryption(), authorize(ROLES.DOCTOR), PatientController.getPrescriptionDetail);
-router.get('/medicines',validateDataEncryption(), authorize(ROLES.DOCTOR), AppointmentController.getMedicines);
+router.get('/prescription', authorize(ROLES.DOCTOR), validateDataEncryption(), PatientController.getPrescriptionDetail);
+router.get('/medicines', authorize(ROLES.DOCTOR), validateDataEncryption(), AppointmentController.getMedicines);
 
 module.exports = router;

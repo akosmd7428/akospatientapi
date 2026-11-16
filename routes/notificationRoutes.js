@@ -6,9 +6,9 @@ const portalUsers = authorize(ROLES.PATIENT, ROLES.CARE_NAVIGATOR, ROLES.HR);
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
 const router = express.Router();
 
-router.post('/notifications',validateDataEncryption(),portalUsers, NotificationController.createNotification);
-router.get('/notifications',validateDataEncryption(),portalUsers, NotificationController.getNotifications);
-router.post('/removeNotification',validateDataEncryption(),portalUsers, NotificationController.removeNotification);
-router.post('/updateReadNotification',validateDataEncryption(),portalUsers, NotificationController.updateReadNotification);
+router.post('/notifications', portalUsers, validateDataEncryption(), NotificationController.createNotification);
+router.get('/notifications', portalUsers, validateDataEncryption(), NotificationController.getNotifications);
+router.post('/removeNotification', portalUsers, validateDataEncryption(), NotificationController.removeNotification);
+router.post('/updateReadNotification', portalUsers, validateDataEncryption(), NotificationController.updateReadNotification);
 
 module.exports = router;

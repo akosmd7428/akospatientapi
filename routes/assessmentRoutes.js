@@ -7,16 +7,16 @@ const patientAssessmentSchema = require('../validation/patientAssessmentValidato
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
 const router = express.Router();
 
-router.get('/get',validateDataEncryption(),jwtAuth, AssessmentController.getAssessments);
-router.get('/detail/:assessmentId',validateDataEncryption(),jwtAuth, AssessmentController.getAssessmentDetails);
+router.get('/get', jwtAuth, validateDataEncryption(), AssessmentController.getAssessments);
+router.get('/detail/:assessmentId', jwtAuth, validateDataEncryption(), AssessmentController.getAssessmentDetails);
 
-router.get('/completed',validateDataEncryption(),jwtAuth, PatientAssessmentController.assessmentTakenByPatient);
-router.get('/completedDetails/:assessmentId',validateDataEncryption(), jwtAuth, PatientAssessmentController.getPatientAssessmentsDetails);
+router.get('/completed', jwtAuth, validateDataEncryption(), PatientAssessmentController.assessmentTakenByPatient);
+router.get('/completedDetails/:assessmentId', jwtAuth, validateDataEncryption(), PatientAssessmentController.getPatientAssessmentsDetails);
 
-router.post('/createBulk',validateDataEncryption(),jwtAuth, PatientAssessmentController.createPatientAssessments);
+router.post('/createBulk', jwtAuth, validateDataEncryption(), PatientAssessmentController.createPatientAssessments);
 
-router.get('/behaviouralHealth/:assessmentId',validateDataEncryption(),jwtAuth, AssessmentController.getBehaviouralDetails);
-router.post('/behaviouralHealth',validateDataEncryption(),jwtAuth, PatientAssessmentController.createBehaviouralHealth);
+router.get('/behaviouralHealth/:assessmentId', jwtAuth, validateDataEncryption(), AssessmentController.getBehaviouralDetails);
+router.post('/behaviouralHealth', jwtAuth, validateDataEncryption(), PatientAssessmentController.createBehaviouralHealth);
 
 // router.get('/get', jwtAuth, PatientAssessmentController.getPatientAssessments); //Ignore
 // router.post('/create', jwtAuth, PatientAssessmentController.createPatientAssessment); //Ignore

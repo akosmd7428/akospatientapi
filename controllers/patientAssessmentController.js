@@ -242,7 +242,16 @@ class PatientAssessmentController {
             }
             // Call method to get response for the assessments
             if(API_URL && assessmentLevel == level){ 
-                const assessmentResponse = await PatientAssessmentService.calculateResponse(API_URL, transformInputFinalData);
+                let assessmentResponse;
+                try {
+                    assessmentResponse = await PatientAssessmentService.calculateResponse(API_URL, transformInputFinalData);
+                } catch (scoringError) {
+                    // the external scoring service failed (down, timeout or its own 500): the answers are already saved,
+                    // tell the client it is the scoring step (502) instead of a generic 500, and log what the service said
+                    const upstream = scoringError.response ? `status ${scoringError.response.status}` : (scoringError.code || scoringError.message);
+                    console.error(`[assessment] scoring service failed for assessment ${assessmentId} (patient ${patientId}): ${upstream}`);
+                    return sendError(res, STATUS_CODE.HTTP_502_BAD_GATEWAY, messages.assessmentScoringUnavailable);
+                }
                 //Save Response into DB
                 if(assessmentResponse.data){
                     if(assessmentLevel > 1){

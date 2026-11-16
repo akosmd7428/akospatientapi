@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { loginTokenOptions } = require('../middleware/authorize');
 const Patient = require('../models/patientModel');
 const crypto = require('crypto');
 const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient');
@@ -77,14 +78,14 @@ class AuthService {
       throw new Error(INVALID_LOGIN);
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: getRole }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    const token = jwt.sign({ id: user.id, email: user.email, role: getRole }, process.env.JWT_SECRET, loginTokenOptions('1d'));
 
     return { token, user, role: loginRole.role };
   }
 
   // extraClaims carries act/actId when a care navigator signs in as the patient
   static async patientLogin(patient, extraClaims = {}) {
-    const token = jwt.sign({ ...extraClaims, id: patient.id, email: patient.email, role:"patient" }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    const token = jwt.sign({ ...extraClaims, id: patient.id, email: patient.email, role:"patient" }, process.env.JWT_SECRET, loginTokenOptions('1d'));
 
     return { token };
   }

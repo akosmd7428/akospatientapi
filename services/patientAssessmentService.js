@@ -245,10 +245,12 @@ class PatientAssessmentService {
 
     static async calculateResponse(API_URL, data) {
         try {
+            // the scoring service is external, never let a hung call hold the request open
             const response = await axios.post(API_URL, data, {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                timeout: 60000,
             });
             return response;
         } catch (error) {

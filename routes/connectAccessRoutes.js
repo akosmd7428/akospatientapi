@@ -6,7 +6,7 @@ const validateSchema = require('../middleware/validateSchema');
 const jwtAuth = require('../middleware/jwtAuth');
 const validateDataEncryption = require('../middleware/validateDataEncryption');
 
-router.post('/generate-code', validateDataEncryption(), jwtAuth, ConnectAccessController.generateCode);
-router.post('/verify-code', validateDataEncryption(), jwtAuth, validateSchema(connectVerifyCodeValidation), ConnectAccessController.verifyCode);
+router.post('/generate-code', jwtAuth, validateDataEncryption(), ConnectAccessController.generateCode);
+router.post('/verify-code', jwtAuth, validateDataEncryption(), validateSchema(connectVerifyCodeValidation), ConnectAccessController.verifyCode);
 
 module.exports = router;
