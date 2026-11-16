@@ -3,7 +3,31 @@ const VitalMonitoringService = require('../services/vitalMonitoringService');
 const CommonHelper = require('../helpers/commonHelper');
 const { messages } = require('../config/language');
 const { STATUS_CODE } = require('../config/constant');
-const { companyPatientListSchema, ohcCreatePatientSchema } = require('../validation/patientValidation');
+const CallEvents = require('../socket/callEvents');
+const { signOhcCallToken, OHC_CALL_TOKEN_TTL_SECONDS } = require('../socket/ohcCallToken');
+const {
+    companyPatientListSchema,
+    ohcCreatePatientSchema,
+    ohcCallTalkToDoctorSchema,
+    ohcDeclineFromPatientSchema,
+    ohcCompanyPatientSchema,
+} = require('../validation/patientValidation');
+const AppointmentController = require('./appointmentController');
+const AppointmentService = require('../services/appointmentService');
+const ConnectAccessService = require('../services/connectAccessService');
+const ChatService = require('../services/chatService');
+
+// validate { company_id, patient_id, ... } and check the patient belongs to that company;
+// sends the 400 / 404 and returns null when it does not
+const validateCompanyPatient = async (schema, input, res) => {
+    const value = validateInput(schema, input, res);
+    if (!value) return null;
+    if (!await PatientService.isCompanyPatient(value.company_id, value.patient_id)) {
+        CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.ohcPatientNotInCompany);
+        return null;
+    }
+    return value;
+};
 const {
     vitalPatientSchema,
     vitalPatientDeviceSchema,
@@ -152,6 +176,109 @@ class OhcSyncController {
             const { patient_id, device_id, comment, created_by, user_type } = value;
             const deviceComments = await VitalMonitoringService.postDeviceComment({ patient_id, device_id, comment, created_by, user_type, status: 1 });
             return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { deviceComments });
+        } catch (error) {
+            console.error(error);
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+        }
+    }
+
+    // same data as /appointment/talkToDoctor, for a patient of the company; 404 when no doctor is available
+    static async talkToDoctor(req, res) {
+        try {
+            const value = await validateCompanyPatient(ohcCompanyPatientSchema, req.query, res);
+            if (!value) return;
+            const response = await AppointmentController.buildTalkToDoctorResponse(value.patient_id);
+            if (!response) {
+                return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_404_NOT_FOUND, AppointmentController.NO_DOCTOR_MESSAGE);
+            }
+            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { response });
+        } catch (error) {
+            console.error(error);
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+        }
+    }
+
+    // one time connect-api code for the patient (x-connect-code + x-patient-id), same as /connect-access/generate-code
+    static async connectCode(req, res) {
+        try {
+            const value = await validateCompanyPatient(ohcCompanyPatientSchema, req.body, res);
+            if (!value) return;
+            const { code, expiresIn } = await ConnectAccessService.generateCode(value.patient_id);
+            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.connect_code_generated, { code, expires_in: expiresIn });
+        } catch (error) {
+            console.error(error);
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+        }
+    }
+
+    // connect-api access token (X-AUTH-TOKEN) for the patient, same as /appointment/connect-token
+    static async connectToken(req, res) {
+        try {
+            const value = await validateCompanyPatient(ohcCompanyPatientSchema, req.body, res);
+            if (!value) return;
+            const accessToken = await AppointmentService.getConnectToken(value.patient_id);
+            if (!accessToken) {
+                // newapi failed or the patient has no uuid
+                return CommonHelper.sendErrorUnencrypt(res, 502, 'Unable to get call token');
+            }
+            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { access_token: accessToken });
+        } catch (error) {
+            console.error(error);
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+        }
+    }
+
+    // socket token for the ohc portal: joins the socket as this patient, call events only (socket/ohcCallToken.js)
+    static async socketToken(req, res) {
+        try {
+            const value = await validateCompanyPatient(ohcCompanyPatientSchema, req.body, res);
+            if (!value) return;
+            const socketToken = signOhcCallToken(value.patient_id);
+            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { socket_token: socketToken, expires_in: OHC_CALL_TOKEN_TTL_SECONDS });
+        } catch (error) {
+            console.error(error);
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+        }
+    }
+
+    // doctor who accepted the patient's call (what the socket event acceptedCallRecordFront carries), null while waiting
+    static async callStatus(req, res) {
+        try {
+            const value = await validateCompanyPatient(ohcCompanyPatientSchema, req.query, res);
+            if (!value) return;
+            const callDetails = await ChatService.getCallDetailsForPatientAccept(value.patient_id);
+            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { callDetails: callDetails || null });
+        } catch (error) {
+            console.error(error);
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+        }
+    }
+
+    // socket incomingCallTalkToDoctor for an ohc patient: rings the doctors available for the patient
+    static async incomingCallTalkToDoctor(req, res) {
+        try {
+            const value = await validateCompanyPatient(ohcCallTalkToDoctorSchema, req.body, res);
+            if (!value) return;
+            const { patient_id, call_id } = value;
+            const doctorsNotified = await CallEvents.incomingCallTalkToDoctor(CallEvents.getIO(), patient_id, call_id);
+            if (doctorsNotified === null) {
+                return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.ohcCallNotFound);
+            }
+            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.ohcCallRequested, { doctorsNotified });
+        } catch (error) {
+            console.error(error);
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+        }
+    }
+
+    // socket declinefromPatient for an ohc patient: closes the patient's waiting room rows and tells the doctors
+    static async declinefromPatient(req, res) {
+        try {
+            const value = await validateCompanyPatient(ohcDeclineFromPatientSchema, req.body, res);
+            if (!value) return;
+            const { patient_id, doctor_id, connect_doc_id } = value;
+            const data = await CallEvents.declinefromPatient(CallEvents.getIO(), patient_id, doctor_id, connect_doc_id);
+            return CommonHelper.sendSuccessUnencrypt(res, data, STATUS_CODE.HTTP_200_OK, messages.ohcCallDeclined);
         } catch (error) {
             console.error(error);
             return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);

@@ -135,7 +135,30 @@ const ohcCreatePatientSchema = Joi.object({
     last_name: Joi.string().trim().max(100).required(),
 });
 
+// ohc-sync call events, company_id is the company the ohc backend verified for its logged in user
+const ohcCallTalkToDoctorSchema = Joi.object({
+    company_id: Joi.number().integer().positive().required(),
+    patient_id: Joi.number().integer().positive().required(),
+    call_id: Joi.number().integer().positive().required(),
+});
+
+const ohcDeclineFromPatientSchema = Joi.object({
+    company_id: Joi.number().integer().positive().required(),
+    patient_id: Joi.number().integer().positive().required(),
+    connect_doc_id: Joi.number().integer().positive().required(),
+    doctor_id: Joi.number().integer().positive().allow(null).optional(),
+});
+
+// ohc-sync talk to doctor data, connect token / code and call status of one company patient
+const ohcCompanyPatientSchema = Joi.object({
+    company_id: Joi.number().integer().positive().required(),
+    patient_id: Joi.number().integer().positive().required(),
+});
+
 module.exports = {
+    ohcCompanyPatientSchema,
+    ohcCallTalkToDoctorSchema,
+    ohcDeclineFromPatientSchema,
     createOrUpdatePatientSchema,
     companyPatientListSchema,
     ohcCreatePatientSchema,

@@ -1870,6 +1870,15 @@ class PatientService {
         });
     }
 
+    // true when the patient is an active patient of the company (same rule as getCompanyPatients)
+    static async isCompanyPatient(companyId, patientId) {
+        const [row] = await sequelizeDB1.query(
+            'SELECT p.id FROM patient p WHERE p.id = :patientId AND (p.companyId = :companyId OR p.employer_id = :companyId) AND p.is_active = 1 LIMIT 1',
+            { replacements: { companyId, patientId }, type: QueryTypes.SELECT }
+        );
+        return !!row;
+    }
+
     // create a patient of a company for the ohc backend, same rows as the sso login (patient + connectedCompaniesPatient login row),
     // returns { patient } or { error: 'company_not_found' | 'email_exists', patientId }
     static async createOhcPatient({ company_id, email, phone, date_of_birth, gender, first_name, last_name }) {

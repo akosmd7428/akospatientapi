@@ -6,6 +6,8 @@ const AppointmentService = require('../services/appointmentService');
 const { verifyLoginToken, ROLES } = require('../middleware/authorize');
 const { sequelizeDB1 } = require('../config/sequelize');
 const { QueryTypes } = require('sequelize');
+const CallEvents = require('./callEvents');
+const { verifyOhcCallToken } = require('./ohcCallToken');
 
 const { USER_TYPE, toPositiveInt } = ChatService;
 
@@ -28,8 +30,11 @@ const CHAT_ROLES = [ROLES.PATIENT, ROLES.DOCTOR, ROLES.CARE_NAVIGATOR];
 const DEFAULT_CORS_ORIGINS = process.env.NODE_ENV === 'production'
   ? 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://carenavigator-staging.akosmd.in,https://connect-portal-staging.akosmd.in,https://connect-portal.akosmd.in'
   : 'https://carenavigator.akosmd.in,https://360.akosmd.in,https://360-staging.akosmd.in,https://carenavigator-staging.akosmd.in,https://connect-portal-staging.akosmd.in,https://connect-portal.akosmd.in,http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005';
+// the ohc portal only uses the socket (talk to doctor calls), not the express apis;
+// extra origins can be added with OHC_SOCKET_ORIGINS (comma separated)
+const OHC_SOCKET_ORIGINS = process.env.OHC_SOCKET_ORIGINS || 'https://ohc.akosmd.in';
 // a browser origin never ends with "/", a trailing "/" in the list is removed so the origin still matches
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim().replace(/\/+$/, '')).filter(Boolean);
+const CORS_ORIGINS = [process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS, OHC_SOCKET_ORIGINS].join(',').split(',').map(origin => origin.trim().replace(/\/+$/, '')).filter(Boolean);
 
 const DENIED = { success: false, error: 'Access denied' };
 const INVALID = { success: false, error: 'Invalid request' };
@@ -37,9 +42,14 @@ const FAILED = { success: false, error: 'Something went wrong' };
 
 // personal room of a logged in user, every socket of that user joins it on connect
 const userRoom = (role, id) => `user:${role}:${id}`;
-const DOCTORS_ROOM = 'doctors';
-// room of one connect_provider id, every socket of the doctor owning it joins on connect
-const connectRoom = (connectDocId) => `connect:${connectDocId}`;
+// ohc portal socket of a patient's talk to doctor call: gets only the call events of that patient,
+// never the patient's personal room (chat list / history pushes)
+const ohcCallRoom = (patientId) => `ohc-call:patient:${patientId}`;
+// what an ohc call socket may do, every other event is refused
+const OHC_CALL_EVENTS = ['incomingCallTalkToDoctor', 'declinefromPatient', 'fetchPatientCallDetail'];
+// doctors room and the room of one connect_provider id (every socket of the doctor owning it
+// joins on connect) are defined in callEvents, the ohc-sync api emits to the same rooms
+const { DOCTORS_ROOM, connectRoom } = CallEvents;
 
 // chat abuse limits
 const MAX_MESSAGE_LENGTH = 5000;
@@ -93,22 +103,33 @@ const io = socket(httpServer, {
   // events only carry text and ids, chat files go through the http upload
   maxHttpBufferSize: 1e5,
 });
+// lets the http apis (ohc-sync) emit to the same rooms
+CallEvents.setIO(io);
 
-// every socket must present a login token: io(url, { auth: { token } })
+// every socket must present a login token: io(url, { auth: { token } }),
+// or an ohc call token from /ohc-sync/socket-token (patient of the ohc company, call events only)
 io.use((socket, next) => {
-  const decoded = verifyLoginToken(socket.handshake.auth?.token, SOCKET_ROLES);
+  const token = socket.handshake.auth?.token;
+  const decoded = verifyLoginToken(token, SOCKET_ROLES);
   const id = decoded ? toPositiveInt(decoded.id) : null;
-  if (!decoded || !id) {
-    return next(new Error('unauthorized'));
+  if (decoded && id) {
+    socket.data.user = { id, role: decoded.role, userType: ROLE_USER_TYPE[decoded.role] || null, email: decoded.email };
+    socket.data.tokenExp = Number(decoded.exp) || null;
+    return next();
   }
-  socket.data.user = { id, role: decoded.role, userType: ROLE_USER_TYPE[decoded.role] || null, email: decoded.email };
-  socket.data.tokenExp = Number(decoded.exp) || null;
-  next();
+  const ohcCall = verifyOhcCallToken(token);
+  if (ohcCall) {
+    socket.data.user = { id: Number(ohcCall.id), role: ROLES.PATIENT, userType: USER_TYPE.PATIENT, email: undefined };
+    socket.data.ohcCall = true;
+    socket.data.tokenExp = ohcCall.exp;
+    return next();
+  }
+  return next(new Error('unauthorized'));
 });
 
 io.on("connection", (socket) => {
   const me = socket.data.user;
-  socket.join(userRoom(me.role, me.id));
+  socket.join(socket.data.ohcCall ? ohcCallRoom(me.id) : userRoom(me.role, me.id));
   if (me.role === ROLES.DOCTOR) {
     socket.join(DOCTORS_ROOM);
     // call events only go to the doctor's own connect provider rooms
@@ -141,7 +162,7 @@ io.on("connection", (socket) => {
   const on = (event, roles, handler) => {
     socket.on(event, async (payload, callback) => {
       const reply = typeof callback === 'function' ? callback : () => {};
-      if (!roles.includes(me.role)) {
+      if (!roles.includes(me.role) || (socket.data.ohcCall && !OHC_CALL_EVENTS.includes(event))) {
         return reply(DENIED);
       }
       try {
@@ -306,29 +327,8 @@ io.on("connection", (socket) => {
     const call = toPositiveInt(callId);
     if (!call) return reply(INVALID);
 
-    const waitingList = await DataController.getTalkToDoctorCallList(me.id, call);
-   // console.log("wait",waitingList)
-    const data = {
-      waitingList
-    };
-    //console.log("daata",data);
-    // doctors come from the server, client connectDoctorIds/groupIds are ignored
-    const { connectDoctorIds, groupIds } = await AppointmentService.fetchDoctorIds(me.id);
-   // console.log("connecte_doc",connectDoctorIds);
-
-    connectDoctorIds.forEach((id, index) => {
-      console.log(data.waitingList[0]);
-      if (data.waitingList[0] != undefined) {
-        data.waitingList[0].group_id = groupIds[index];
-        data.waitingList[0].pcp_doctor_id = id;
-        data.waitingList[0].callHide = 0;
-       // console.log("room",connectRoom(id));
-        // io.to(DOCTORS_ROOM).emit('incomingCallListFront', data);
-        // patient details only go to the doctor the call is offered to
-       // console.log(data);
-        io.to(connectRoom(id)).emit('incomingCallListFront', data);
-      }
-    });
+    // same function as the ohc-sync api, doctors come from the server, client connectDoctorIds/groupIds are ignored
+    await CallEvents.incomingCallTalkToDoctor(io, me.id, call);
     reply({ success: true });
   });
 
@@ -375,21 +375,16 @@ io.on("connection", (socket) => {
     const data = {
       callDetails
     };
-    io.to(userRoom(ROLES.PATIENT, patientId)).emit('acceptedCallRecordFront', data);
+    // the patient app, and the ohc portal when the call was made from there
+    io.to(userRoom(ROLES.PATIENT, patientId)).to(ohcCallRoom(patientId)).emit('acceptedCallRecordFront', data);
     reply({ success: true, data });
   });
 
   on('declinefromPatient', [ROLES.PATIENT], async ({ doctorId, connectDocId }, reply) => {
     const connectId = toPositiveInt(connectDocId);
     if (!connectId) return reply(INVALID);
-    // only the patient's own waiting room rows are closed
-    await ChatService.updateCallingRoom(doctorId, me.id, connectId);
-    const data = {
-      "doctorId" : toPositiveInt(doctorId),
-      "patientId" : me.id,
-      "connectDocId" : connectId
-    };
-    io.to(DOCTORS_ROOM).emit('declinefromPatientFront', data);
+    // only the patient's own waiting room rows are closed, same function as the ohc-sync api
+    const data = await CallEvents.declinefromPatient(io, me.id, doctorId, connectId);
     reply({ success: true, data });
   });
 
@@ -404,7 +399,7 @@ io.on("connection", (socket) => {
       "patientId" : patient,
       "connectDocId" : connectId
     };
-    io.to(userRoom(ROLES.PATIENT, patient)).emit('declinefromDoctorFront', data);
+    io.to(userRoom(ROLES.PATIENT, patient)).to(ohcCallRoom(patient)).emit('declinefromDoctorFront', data);
     reply({ success: true, data });
   });
 

@@ -415,24 +415,32 @@ class AppointmentController {
 
     static async talkToDoctor(req, res, next) {
         try {
-           // console.log("pp",req.user.id);
-            const patientId = req.user.id;
+            const response = await AppointmentController.buildTalkToDoctorResponse(req.user.id);
+            if (!response) {
+                // 4xx so the message is not stripped like 500 errors, the patient app shows errors/message in a toast
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, AppointmentController.NO_DOCTOR_MESSAGE, AppointmentController.NO_DOCTOR_MESSAGE);
+            }
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { response });
+        } catch (error) {
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
+    }
+
+    static NO_DOCTOR_MESSAGE = "Currently, No doctor is available to connect.";
+
+    // talk to doctor data of a patient (patient details, available doctors, call data, in process call),
+    // null when no doctor is available. Used by /appointment/talkToDoctor and /ohc-sync/talk-to-doctor.
+    static async buildTalkToDoctorResponse(patientId) {
             const patientDetails = await AppointmentService.talkToDoctorDetails(patientId);
-            const patientDetail = await AppointmentService.getPatientDetails(patientId);
             const data = await AppointmentService.fetchDoctorIds(patientId);
             const doctorIds = data.doctorIds.length > 0 ? data.doctorIds: [];
-            let doctorDetails;
             // get In process patient details
             const inProcessPatientData = await AppointmentService.fetchInprocessPatient(patientId);
-            if(doctorIds.length > 0){
-                doctorDetails = await AppointmentService.fetchDoctorDetails(doctorIds);
-            }else{
-                // throw new Error("Currently, No doctor is available to connect.");
-                // 4xx so the message is not stripped like 500 errors, the patient app shows errors/message in a toast
-                const noDoctorMessage = "Currently, No doctor is available to connect.";
-                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, noDoctorMessage, noDoctorMessage);
+            if (doctorIds.length === 0) {
+                return null;
             }
-            
+            const doctorDetails = await AppointmentService.fetchDoctorDetails(doctorIds);
+
             const response = {
                 patientDetails: {
                     name: patientDetails.firstName+' '+patientDetails.lastName,
@@ -459,11 +467,7 @@ class AppointmentController {
                 doctorCallData: data,
                 inProcessPatientData:inProcessPatientData
             };
-
-            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { response });
-        } catch (error) {
-            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
-        }
+            return response;
     }
 
     // connect-api token for the logged-in patient (replaces the browser calling newapi /v1/tokens).

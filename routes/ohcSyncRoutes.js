@@ -15,4 +15,17 @@ router.get('/get-detail-monitoring', syncApiKeyAuth, OhcSyncController.getDetail
 router.get('/view-device-comment', syncApiKeyAuth, OhcSyncController.viewDeviceComment);
 router.post('/post-device-comment', syncApiKeyAuth, OhcSyncController.postDeviceComment);
 
+// call events for ohc patients, the same functions as the socket events incomingCallTalkToDoctor / declinefromPatient
+router.post('/incoming-call-talk-to-doctor', syncApiKeyAuth, OhcSyncController.incomingCallTalkToDoctor);
+router.post('/decline-from-patient', syncApiKeyAuth, OhcSyncController.declinefromPatient);
+
+// talk to doctor call made from the ohc portal for a company patient: call data, connect-api token and
+// one time code (the connect-api calls are made by the ohc browser like the patient app), accepted doctor
+router.get('/talk-to-doctor', syncApiKeyAuth, OhcSyncController.talkToDoctor);
+router.post('/connect-code', syncApiKeyAuth, OhcSyncController.connectCode);
+router.post('/connect-token', syncApiKeyAuth, OhcSyncController.connectToken);
+router.get('/call-status', syncApiKeyAuth, OhcSyncController.callStatus);
+// socket token for the ohc portal browser: joins the socket as the patient, call events only
+router.post('/socket-token', syncApiKeyAuth, OhcSyncController.socketToken);
+
 module.exports = router;
