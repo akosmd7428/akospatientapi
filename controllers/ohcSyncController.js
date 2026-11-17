@@ -11,7 +11,9 @@ const {
     ohcCallTalkToDoctorSchema,
     ohcDeclineFromPatientSchema,
     ohcCompanyPatientSchema,
+    ohcChatUploadSchema,
 } = require('../validation/patientValidation');
+const DataService = require('../services/dataService');
 const AppointmentController = require('./appointmentController');
 const AppointmentService = require('../services/appointmentService');
 const ConnectAccessService = require('../services/connectAccessService');
@@ -236,6 +238,23 @@ class OhcSyncController {
             const socketToken = signOhcCallToken(value.patient_id);
             return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { socket_token: socketToken, expires_in: OHC_CALL_TOKEN_TTL_SECONDS });
         } catch (error) {
+            console.error(error);
+            return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+        }
+    }
+
+    // chat file of a talk to doctor call made from the ohc portal: stored like the patient app's /data/upload (type chat),
+    // the returned fileUrl is then sent as a messageType 2 chat message on the socket
+    static async chatUpload(req, res) {
+        try {
+            const value = await validateCompanyPatient(ohcChatUploadSchema, req.body, res);
+            if (!value) return;
+            const fileUrl = await DataService.uploadFile(value.file, 'chat', 'patient');
+            return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.fileUploaded, { fileUrl });
+        } catch (error) {
+            if (error.isValidation) {
+                return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.message);
+            }
             console.error(error);
             return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
         }

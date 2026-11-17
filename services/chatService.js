@@ -146,6 +146,23 @@ class ChatService {
         }
     }
 
+    // patient - doctor messages of a talk to doctor call made from the ohc portal: only the ones sent since the
+    // call started (the ohc user must not see the patient's earlier conversations), formatted like getChatHistory
+    static async getOhcCallChatHistory(patientId, doctorId, sinceMs) {
+        const chatHistory = await Chat.findAll({
+            where: {
+                [Op.or]: [
+                    { senderId: patientId, senderType: USER_TYPE.PATIENT, receiverId: doctorId, receiverType: USER_TYPE.DOCTOR },
+                    { senderId: doctorId, senderType: USER_TYPE.DOCTOR, receiverId: patientId, receiverType: USER_TYPE.PATIENT },
+                ],
+                createdAt: { [Op.gte]: new Date(sinceMs) },
+            },
+            order: [['createdAt', 'DESC']],
+            raw: true,
+        });
+        return this.formatChatHistory(chatHistory, patientId, USER_TYPE.PATIENT);
+    }
+
     static async formatChatHistory(chatHistory, senderId, senderType) {
         const groupedMessages = {};
         const formattedMessages = [];

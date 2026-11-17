@@ -9,6 +9,10 @@ const { emailHelperSMTP } = require('../helpers/emailHelperSMTP');
 const EmailTemplates = require('../helpers/emailTemplates');
 const { sendSms } = require('./smsService');
 const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient');
+const { HRA_ASSESSMENT_ID } = require('../config/constant');
+
+// LIKE '%term%' where % and _ typed by the user are matched as plain characters
+const likeContains = (term) => `%${String(term).replace(/[\\%_]/g, '\\$&')}%`;
 
 
 class PreEmployeePatientService {
@@ -154,83 +158,88 @@ class PreEmployeePatientService {
 
     }
 
-    static async getHraAssessment(companyId,year,searchQuery) {  
+    // hra summary of a company for the employees who joined in `year`: total, completed the health risk assessment, pending.
+    // search (name) narrows total, completed and pending alike so pending = total - completed always holds
+    static async getHraAssessment(companyId,year,searchQuery) {
+      try {
         let query = `
-        SELECT 
-           count(id) as count
-        FROM 
-            patient       
-        WHERE 
-            employer_id = :companyId AND  YEAR(patient.created_at) = :year
-      `;  
-      
-      try {    
-        const [result] = await sequelizeDB1.query(query, {
-            replacements:{ companyId,year},
-          type: QueryTypes.SELECT,
-        });      
-        let query1 = `
-            SELECT 
-                a.patientId, count(p.id) as c
+            SELECT
+                COUNT(*) AS total,
+                COALESCE(SUM(EXISTS (
+                    SELECT 1 FROM assessmentResponse a
+                    WHERE a.patientId = p.id AND a.assessmentId = :hraAssessmentId
+                )), 0) AS taken
             FROM
-                patient as p  
-            LEFT JOIN 
-                assessmentResponse as a on p.id = a.patientId 
-            WHERE 
+                patient AS p
+            WHERE
                 p.employer_id = :companyId AND YEAR(p.created_at) = :year`;
+        const replacements = { companyId, year, hraAssessmentId: HRA_ASSESSMENT_ID };
         if(searchQuery){
-            query1 += ` AND (p.name LIKE :search OR CONCAT(p.first_name, ' ', p.last_name) LIKE :search)`;
+            query += ` AND (p.name LIKE :search OR CONCAT(p.first_name, ' ', p.last_name) LIKE :search)`;
+            replacements.search = likeContains(searchQuery);
         }
-        query1 += ` GROUP BY a.patientId`;      
-        const replacements = { 
-             year,  // The year provided as input
-            companyId,
-        };
-        if(searchQuery){
-            replacements.search =  `%${searchQuery}%`;
-        }
-        const result2 = await sequelizeDB1.query(query1, {  
+        const [result] = await sequelizeDB1.query(query, {
             replacements,
-          type: QueryTypes.SELECT,
-        }); 
-       let count = result2.length;
-       let tot = result.count;  
-       let response = {
+            type: QueryTypes.SELECT,
+        });
+        const tot = Number(result.total) || 0;
+        const count = Number(result.taken) || 0;
+        let response = {
             total_employee:tot,
             hra_avail:count,
             hra_pending:tot - count
         }
         return response;
-      } catch (error) {   
+      } catch (error) {
         console.log(error);
         throw new Error('Error fetching hra assesment detail');
       }
     }
+    /* previous version, replaced: it counted any assessment (not only the health risk one), the LEFT JOIN +
+       GROUP BY a.patientId counted all employees without a response as one extra "completed" (the NULL group),
+       and the search narrowed "completed" but not the total
+    static async getHraAssessment(companyId,year,searchQuery) {
+        let query = `SELECT count(id) as count FROM patient WHERE employer_id = :companyId AND YEAR(patient.created_at) = :year`;
+        const [result] = await sequelizeDB1.query(query, { replacements:{ companyId,year}, type: QueryTypes.SELECT });
+        let query1 = `SELECT a.patientId, count(p.id) as c FROM patient as p LEFT JOIN assessmentResponse as a on p.id = a.patientId
+            WHERE p.employer_id = :companyId AND YEAR(p.created_at) = :year`;
+        if(searchQuery){ query1 += ` AND (p.name LIKE :search OR CONCAT(p.first_name, ' ', p.last_name) LIKE :search)`; }
+        query1 += ` GROUP BY a.patientId`;
+        const result2 = await sequelizeDB1.query(query1, { replacements: { year, companyId, search: `%${searchQuery}%` }, type: QueryTypes.SELECT });
+        return { total_employee: result.count, hra_avail: result2.length, hra_pending: result.count - result2.length };
+    }
+    */
     static async getEmpPendingHra(companyId,year,searchQuery) {  
         try {
+            // employees who have not completed the health risk assessment
+            // (was: LEFT JOIN assessmentResponse as a ON a.patientId IS NULL, which never matched a response to its
+            //  employee, so every employee was listed as pending, also the ones who had completed it)
             let queryUnavail = `
-            SELECT 
+            SELECT
             p.*,pd.profile_image
-            FROM 
-                patient as p 
+            FROM
+                patient as p
             LEFT JOIN
-                patientDetails as pd On p.id = pd.patientId    
-            LEFT JOIN
-                assessmentResponse as a ON a.patientId IS NULL
-            WHERE 
-                p.employer_id = :companyId`;
+                patientDetails as pd On p.id = pd.patientId
+            WHERE
+                p.employer_id = :companyId
+                AND NOT EXISTS (
+                    SELECT 1 FROM assessmentResponse a
+                    WHERE a.patientId = p.id AND a.assessmentId = :hraAssessmentId
+                )`;
 
             if(searchQuery){
-                queryUnavail += ` AND (p.name LIKE :search OR CONCAT(p.first_name, ' ', p.last_name) LIKE :search)`; 
-            }            
+                queryUnavail += ` AND (p.name LIKE :search OR CONCAT(p.first_name, ' ', p.last_name) LIKE :search)`;
+            }
             queryUnavail += ` AND YEAR(p.created_at) = :year`;
-         
-            const replacements = { 
+
+            const replacements = {
                 year,  // The year provided as input
-                companyId, 
+                companyId,
+                hraAssessmentId: HRA_ASSESSMENT_ID,
             };
             if (searchQuery) {
-                replacements.search = `%${searchQuery}%`;
+                replacements.search = likeContains(searchQuery);
             }
             const resultUnAvail = await sequelizeDB1.query(queryUnavail, {   
                 replacements,     
@@ -256,22 +265,26 @@ class PreEmployeePatientService {
     // get month wise 
     static async getMonthWise(companyId,year){       
         try {
-            const sqlMonth =`SELECT 
+            // employees who completed the health risk assessment, per month of `year`
+            // (was: count(p.id) over every assessment response of any assessment, so one employee taking
+            //  several assessments, or retaking one, was counted many times)
+            const sqlMonth =`SELECT
                 DATE_FORMAT(a.createdAt, '%m') AS month,
-                count(p.id) AS total_amount              
-            FROM 
+                COUNT(DISTINCT p.id) AS total_amount
+            FROM
                patient as p
-             LEFT JOIN 
-                assessmentResponse as a on p.id = a.patientId 
+             JOIN
+                assessmentResponse as a on p.id = a.patientId AND a.assessmentId = :hraAssessmentId
             WHERE
                 YEAR(a.createdAt) = :year AND p.employer_id=:companyId
-            GROUP BY 
+            GROUP BY
                 month
-            ORDER BY 
+            ORDER BY
                 month`;
                 const replacements = {
                     year: year,  // The year provided as input
-                    companyId: companyId  // The doctor's ID
+                    companyId: companyId,
+                    hraAssessmentId: HRA_ASSESSMENT_ID,
                 };
             const resultMonth = await sequelizeDB1.query(sqlMonth, {  
                 replacements,      

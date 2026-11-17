@@ -184,10 +184,20 @@ class HrController {
 
     static async getCompanyHraAssesment(req, res){
         try {
-            const { companyId,year,search } = req.query;          
+            const { companyId } = req.query;
+            // year is optional (defaults to the current year) but must be a 4 digit year when sent; search is optional text
+            const rawYear = req.query.year;
+            const year = (rawYear === undefined || rawYear === null || rawYear === '') ? new Date().getFullYear() : Number(rawYear);
+            if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'year must be a 4 digit year, e.g. 2026');
+            }
+            if (req.query.search !== undefined && req.query.search !== null && typeof req.query.search !== 'string' && typeof req.query.search !== 'number') {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'search must be text');
+            }
+            const search = req.query.search ? String(req.query.search).trim().slice(0, 100) : '';
             const companyId_header = await getHrCompanyId(req);
             if (!companyId_header) return companyAccessDenied(res);
-            const hraDetaails = await PreEmployeePatientService.getHraAssessment(companyId_header,year,search); 
+            const hraDetaails = await PreEmployeePatientService.getHraAssessment(companyId_header,year,search);
             const pendingHra = await PreEmployeePatientService.getEmpPendingHra(companyId_header,year,search);
             const empMonthWise = await PreEmployeePatientService.getMonthWise(companyId_header,year,search);
             const data = {

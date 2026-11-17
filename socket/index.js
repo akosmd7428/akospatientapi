@@ -8,6 +8,7 @@ const { sequelizeDB1 } = require('../config/sequelize');
 const { QueryTypes } = require('sequelize');
 const CallEvents = require('./callEvents');
 const { verifyOhcCallToken } = require('./ohcCallToken');
+const { PATIENT_BACKEND_URL } = require('../config/secret');
 
 const { USER_TYPE, toPositiveInt } = ChatService;
 
@@ -45,8 +46,21 @@ const userRoom = (role, id) => `user:${role}:${id}`;
 // ohc portal socket of a patient's talk to doctor call: gets only the call events of that patient,
 // never the patient's personal room (chat list / history pushes)
 const ohcCallRoom = (patientId) => `ohc-call:patient:${patientId}`;
-// what an ohc call socket may do, every other event is refused
-const OHC_CALL_EVENTS = ['incomingCallTalkToDoctor', 'declinefromPatient', 'fetchPatientCallDetail'];
+// what an ohc call socket may do, every other event is refused;
+// chat (sendMessage / getChatHistory) only with the doctor of the patient's call in progress
+const OHC_CALL_EVENTS = ['incomingCallTalkToDoctor', 'declinefromPatient', 'fetchPatientCallDetail', 'sendMessage', 'getChatHistory'];
+
+// patient - doctor pair of a conversation, null for any other pair
+const patientDoctorPair = (aId, aType, bId, bType) => {
+  if (aType === USER_TYPE.PATIENT && bType === USER_TYPE.DOCTOR) return { patientId: aId, doctorId: bId };
+  if (aType === USER_TYPE.DOCTOR && bType === USER_TYPE.PATIENT) return { patientId: bId, doctorId: aId };
+  return null;
+};
+
+// file messages from the ohc portal must be files uploaded through /ohc-sync/chat-upload
+const CHAT_UPLOAD_PREFIX = `${String(PATIENT_BACKEND_URL || '').replace(/\/+$/, '')}/assets/chat/`;
+const isChatUploadUrl = (value) => !!PATIENT_BACKEND_URL && typeof value === 'string'
+  && value.startsWith(CHAT_UPLOAD_PREFIX) && !value.includes('..') && /^[A-Za-z0-9/._:-]+$/.test(value);
 // doctors room and the room of one connect_provider id (every socket of the doctor owning it
 // joins on connect) are defined in callEvents, the ohc-sync api emits to the same rooms
 const { DOCTORS_ROOM, connectRoom } = CallEvents;
@@ -106,6 +120,30 @@ const io = socket(httpServer, {
 // lets the http apis (ohc-sync) emit to the same rooms
 CallEvents.setIO(io);
 
+// doctor (doctor.id) who accepted the patient's call in progress, null when none
+const ohcCallDoctorId = async (patientId) => {
+  const call = await ChatService.getCallDetailsForPatientAccept(patientId);
+  return call ? toPositiveInt(call.doctor_id) : null;
+};
+
+// the ohc portal sockets of a patient's call get the chat with the call's doctor,
+// each only the messages since its own call started (same event shape as the patient app)
+const pushOhcCallChat = async (patientId, doctorId) => {
+  const sockets = await io.in(ohcCallRoom(patientId)).fetchSockets();
+  if (!sockets.length) return;
+  if (await ohcCallDoctorId(patientId) !== doctorId) return;
+  for (const ohcSocket of sockets) {
+    const senderChatHistory = await ChatService.getOhcCallChatHistory(patientId, doctorId, ohcSocket.data.ohcSince);
+    ohcSocket.emit('chatHistory', {
+      senderId: patientId,
+      senderType: USER_TYPE.PATIENT,
+      receiverId: doctorId,
+      receiverType: USER_TYPE.DOCTOR,
+      senderChatHistory,
+    });
+  }
+};
+
 // every socket must present a login token: io(url, { auth: { token } }),
 // or an ohc call token from /ohc-sync/socket-token (patient of the ohc company, call events only)
 io.use((socket, next) => {
@@ -122,6 +160,8 @@ io.use((socket, next) => {
     socket.data.user = { id: Number(ohcCall.id), role: ROLES.PATIENT, userType: USER_TYPE.PATIENT, email: undefined };
     socket.data.ohcCall = true;
     socket.data.tokenExp = ohcCall.exp;
+    // the token is issued when the call starts: the chat shown to the ohc portal begins here
+    socket.data.ohcSince = Number(ohcCall.iat) * 1000;
     return next();
   }
   return next(new Error('unauthorized'));
@@ -201,7 +241,14 @@ io.on("connection", (socket) => {
 
     io.to(senderRoom).emit('chatHistory', { senderId, senderType, senderChatHistory });
     io.to(receiverRoom).emit('chatHistory', { receiverId, receiverType, receiverChatHistory });
+
+    // a talk to doctor call made from the ohc portal sees this patient - doctor conversation too
+    const pair = patientDoctorPair(senderId, senderType, receiverId, receiverType);
+    if (pair) await pushOhcCallChat(pair.patientId, pair.doctorId);
   };
+
+  // ohc portal socket: chat only with the doctor who accepted this patient's call
+  const isOhcCallDoctor = async (to) => to.type === USER_TYPE.DOCTOR && await ohcCallDoctorId(me.id) === to.id;
 
   on('joinRoom', CHAT_ROLES, async ({ receiverId, receiverType }, reply) => {
     const to = parseReceiver(receiverId, receiverType);
@@ -223,6 +270,11 @@ io.on("connection", (socket) => {
     if (!to || typeof message !== 'string') return reply(INVALID);
     if (message.length > MAX_MESSAGE_LENGTH || !ChatService.isValidMessageType(messageType)) return reply(INVALID);
     if (isRateLimited()) return reply({ success: false, error: 'Too many messages' });
+    if (socket.data.ohcCall) {
+      if (!message.trim() || ![1, 2].includes(Number(messageType))) return reply(INVALID);
+      if (Number(messageType) === 2 && !isChatUploadUrl(message)) return reply(INVALID);
+      if (!await isOhcCallDoctor(to)) return reply(DENIED);
+    }
     if (!await ChatService.canChat(me.id, me.userType, to.id, to.type)) return reply(DENIED);
 
     const senderRoom = chatRoom(me.id, me.userType, to.id, to.type);
@@ -264,6 +316,12 @@ io.on("connection", (socket) => {
   on('getChatHistory', CHAT_ROLES, async ({ receiverId, receiverType }, reply) => {
     const to = parseReceiver(receiverId, receiverType);
     if (!to) return reply(INVALID);
+    if (socket.data.ohcCall) {
+      // ohc portal: the call's doctor only, messages since the call started
+      if (!await isOhcCallDoctor(to)) return reply(DENIED);
+      const chatHistory = await ChatService.getOhcCallChatHistory(me.id, to.id, socket.data.ohcSince);
+      return reply({ success: true, senderId: me.id, senderType: me.userType, receiverId: to.id, receiverType: to.type, chatHistory });
+    }
     const chatHistory = await ChatService.getChatHistory(me.id, me.userType, to.id, to.type);
     reply({ success: true, senderId: me.id, senderType: me.userType, receiverId: to.id, receiverType: to.type, chatHistory });
   });

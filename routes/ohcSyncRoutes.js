@@ -27,5 +27,7 @@ router.post('/connect-token', syncApiKeyAuth, OhcSyncController.connectToken);
 router.get('/call-status', syncApiKeyAuth, OhcSyncController.callStatus);
 // socket token for the ohc portal browser: joins the socket as the patient, call events only
 router.post('/socket-token', syncApiKeyAuth, OhcSyncController.socketToken);
+// chat file of the call (sent on the socket as a messageType 2 message)
+router.post('/chat-upload', syncApiKeyAuth, OhcSyncController.chatUpload);
 
 module.exports = router;

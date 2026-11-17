@@ -155,7 +155,15 @@ const ohcCompanyPatientSchema = Joi.object({
     patient_id: Joi.number().integer().positive().required(),
 });
 
+// chat file of an ohc talk to doctor call, a base64 data url (DataService.uploadFile checks type and 10 MB size)
+const ohcChatUploadSchema = Joi.object({
+    company_id: Joi.number().integer().positive().required(),
+    patient_id: Joi.number().integer().positive().required(),
+    file: Joi.string().max(15 * 1024 * 1024).required(),
+});
+
 module.exports = {
+    ohcChatUploadSchema,
     ohcCompanyPatientSchema,
     ohcCallTalkToDoctorSchema,
     ohcDeclineFromPatientSchema,

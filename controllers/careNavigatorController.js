@@ -95,15 +95,29 @@ class CareNavigatorController {
 
     static async getAppointments(req, res, next) {
         try {
-            const { search, status, filter } = req.query;
+            // status (required): 1 upcoming, 2 completed, 3 cancelled; filter (optional): 0 all, 1 last month, 2 last 6 months, 3 last year
+            const status = Number(req.query.status);
+            if (![1, 2, 3].includes(status)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'status is required: 1 (upcoming), 2 (completed) or 3 (cancelled)');
+            }
+            const rawFilter = req.query.filter;
+            const filter = (rawFilter === undefined || rawFilter === null || rawFilter === '') ? '0' : String(rawFilter);
+            if (!['0', '1', '2', '3'].includes(filter)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'filter must be 0 (all), 1 (last month), 2 (last 6 months) or 3 (last year)');
+            }
+            if (req.query.search !== undefined && req.query.search !== null && typeof req.query.search !== 'string' && typeof req.query.search !== 'number') {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'search must be text');
+            }
+            const search = req.query.search ? String(req.query.search).trim().slice(0, 100) : '';
             const careCompanyIds = req.careCompanyIds;
-           
+
             const appointments = await AppointmentService.getAppointmentsForCareNavigator(status, search, filter,careCompanyIds);
-    
+
             if (appointments.length === 0) {
-               // return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.noAppointmentsFound);   
-               const appointmentssta =  [];            
-                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK,messages.noAppointmentsFound, { appointmentssta  });
+               // return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.noAppointmentsFound);
+               const appointmentssta =  [];
+                 // formattedAppointments is the documented list key (the app reads it), appointmentssta is kept for older clients
+                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK,messages.noAppointmentsFound, { formattedAppointments: [], appointmentssta  });
             }
     
             // Process each appointment asynchronously
@@ -294,6 +308,10 @@ class CareNavigatorController {
     static async getLabTests(req, res) {
         try {
             const { status, search, filter } = req.query;
+            // status is required and must be one of the lab order statuses (pending, confirmed, Completed, Report Generated, cancelled, ...)
+            if (!isLabOrderStatus(status)) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'status is required and must be a lab order status, e.g. pending, confirmed, Completed, Report Generated or cancelled');
+            }
             const careCompanyIds = req.careCompanyIds;
             const labTests = await labTestService.getLabOrdersForCareNavigator(status, search, filter,careCompanyIds);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.patientDetailsFetched, { labTests });

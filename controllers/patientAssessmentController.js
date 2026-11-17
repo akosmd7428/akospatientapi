@@ -248,7 +248,12 @@ class PatientAssessmentController {
                 } catch (scoringError) {
                     // the external scoring service failed (down, timeout or its own 500): the answers are already saved,
                     // tell the client it is the scoring step (502) instead of a generic 500, and log what the service said
-                    const upstream = scoringError.response ? `status ${scoringError.response.status}` : (scoringError.code || scoringError.message);
+                   // console.error(scoringError);
+                    // status, body and the cloud run trace id (x-cloud-trace-context) locate the crash in the scoring service logs
+                    const upstreamRes = scoringError.response;
+                    const upstream = upstreamRes
+                        ? `status ${upstreamRes.status}, body ${JSON.stringify(upstreamRes.data).slice(0, 300)}, trace ${(upstreamRes.headers && upstreamRes.headers['x-cloud-trace-context']) || '-'}`
+                        : (scoringError.code || scoringError.message);
                     console.error(`[assessment] scoring service failed for assessment ${assessmentId} (patient ${patientId}): ${upstream}`);
                     return sendError(res, STATUS_CODE.HTTP_502_BAD_GATEWAY, messages.assessmentScoringUnavailable);
                 }
@@ -258,7 +263,7 @@ class PatientAssessmentController {
                         const finalMergedResponse = Object.keys(finalResponsePercentageMulti).reduce((acc, key) => {
                             // Add a result key that contains the summary and percentage for each level
                             acc[key] = {
-                                result: assessmentResponse.data.summaries[key], // Default to empty string if no summary available
+                                result: (assessmentResponse.data.summaries || {})[key] || '', // Default to empty string if no summary available
                                 percentage: finalResponsePercentageMulti[key].totalPercentages || 0, // Default to 0 if percentage not available
                                 maxRange: 100
                             };
@@ -290,6 +295,8 @@ class PatientAssessmentController {
             }
             return sendSuccess(res, true, STATUS_CODE.HTTP_201_CREATED, messages.assessmentCreated);
         } catch (error) {
+            // the client only gets the generic message, the cause is logged so failures can be diagnosed
+            console.error('[assessment] createBulk failed:', error && error.message);
             return sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.assessmentCreatingError, "Something went wrong!");
         }
     }
