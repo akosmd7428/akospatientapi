@@ -1666,6 +1666,15 @@ class PatientService {
         );
         return rows[0] ? Patient.findOne({ where: { id: rows[0].id } }) : null;
     }
+    // true when the patient row still carries this member id (member_id is not mapped on the Patient model)
+    static async patientHasMemberId(patientId, memberId) {
+        if (!patientId || memberId === undefined || memberId === null || String(memberId).trim() === '') return false;
+        const rows = await sequelizeDB1.query(
+            'SELECT id FROM patient WHERE id = :patient_id AND member_id = :member_id LIMIT 1',
+            { type: QueryTypes.SELECT, replacements: { patient_id: patientId, member_id: String(memberId).trim() } }
+        );
+        return rows.length > 0;
+    }
     // true when the api client company is active and the patient belongs to it: the patient's company is that
     // company or one of its child companies, or the patient is connected to it (connectedCompaniesPatient)
     static async isPatientOfClientCompany(patient, clientCompanyId) {

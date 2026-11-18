@@ -24,6 +24,23 @@ SsoDeeplinkCode.init({
         type: DataTypes.STRING(255),
         allowNull: false
     },
+    // the member and the care plan the link was created for, checked again when the link is opened;
+    // nullable only for codes created before these columns existed
+    memberId: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+        field: 'member_id'
+    },
+    planCode: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: 'plan_code'
+    },
+    carePlanId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: 'care_plan_id'
+    },
     expiresAt: {
         type: DataTypes.DATE,
         allowNull: false

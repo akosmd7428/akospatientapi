@@ -8,6 +8,7 @@ const { STATUS_CODE, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH, SSO_DEEPLINK
 const CommonHelper = require('../helpers/commonHelper');
 const { laravelDecrypt } = require('../helpers/laravelCrypt');
 const PatientService = require('../services/patientService');
+const CarePlanService = require('../services/carePlanService');
 const { logError } = require('../helpers/logErrorHelper');
 const { redact } = require('../helpers/redact');
 const { encryptData, decryptData } = require('../config/encryption');
@@ -380,13 +381,50 @@ class AuthController {
     return page === SSO_DEFAULT_REDIRECT_PATH || Object.values(SSO_DEEPLINK_PAGES).includes(page);
   }
 
+  // companies whose care plans a deeplink may use: the api client's company and the member's own company
+  // (the member is already checked to be that company or one of its child companies)
+  static deeplinkPlanCompanies(clientCompanyId, accountHolder) {
+    const memberCompanyId = Number(accountHolder && (accountHolder.companyId || accountHolder.employer_id)) || 0;
+    return [Number(clientCompanyId), memberCompanyId].filter(Boolean);
+  }
+
+  static sendDeeplinkPlanError(res, reason) {
+    const errors = {
+      not_found: [STATUS_CODE.HTTP_400_BAD_REQUEST, messages.sso_plan_not_found],
+      other_company: [STATUS_CODE.HTTP_403_FORBIDDEN, messages.sso_plan_other_company],
+      inactive: [STATUS_CODE.HTTP_400_BAD_REQUEST, messages.sso_plan_inactive],
+      not_started: [STATUS_CODE.HTTP_400_BAD_REQUEST, messages.sso_plan_not_started],
+      expired: [STATUS_CODE.HTTP_400_BAD_REQUEST, messages.sso_plan_expired],
+    };
+    const [status, message] = errors[reason] || errors.not_found;
+    return CommonHelper.sendErrorUnencrypt(res, status, message);
+  }
+
+  // what the client and the patient frontend get to know about the allowed plan
+  static deeplinkPlanDetails(plan) {
+    return {
+      plan_id: plan.plan_code,   // the value the client sent as plan_id
+      care_plan_id: plan.id,     // careplans.id
+      name: plan.packageName,
+      valid_from: plan.validFrom || null,
+      valid_upto: plan.validUpto || null,
+    };
+  }
+
   // the login token (jwtAuth) is verified first, then the member_id is looked up in the patient table and has to be
   // the logged in patient or one of its dependants, the frontend url for the deeplink is returned with the member details,
   // planId is added to the url as plan_id
   static async ssoDeeplink(req, res, next) {
+  
     try {
-      console.log("deep");
-      const { member_id, first_name, last_name, mobile, email, gender, dob, deeplink, planId } = req.body;
+      const { member_id, first_name, last_name, mobile, email, gender, dob, deeplink, planId, plan_id } = req.body;
+      // plan_id carries the plan's code (careplans.plan_code)
+      const planCode = String(plan_id).trim();
+        console.log("pan",planCode);
+      // planId is the older camelCase name of the field, when it is still sent it has to be the same plan
+      if (planId !== undefined && planId !== null && String(planId).trim() !== '' && String(planId).trim() !== planCode) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.sso_plan_mismatch);
+      }
 
       const member = await PatientService.findMemberOfPatient(email, member_id);
       if (!member) {
@@ -407,14 +445,23 @@ class AuthController {
         return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_403_FORBIDDEN, messages.sso_user_other_client);
       }
 
-      // the url only carries a one time code (no login token), the page, company and member are kept on the server
+      // the plan has to be assigned to the client's company (or to the member's own company under it) and usable today
+      const { plan, reason: planReason } = await CarePlanService.getAllowedCompanyPlan(planCode, AuthController.deeplinkPlanCompanies(req.apiClient.id, accountHolder));
+      if (!plan) {
+        return AuthController.sendDeeplinkPlanError(res, planReason);
+      }
+
+      // the url only carries a one time code (no login token), the page, company, member and plan are kept on the server
       // and checked again by /sso-deeplink-verify when the link is opened
       const pagePath = AuthController.getSsoDeeplinkPath(deeplink);
-      const redirectPath = planId ? `${pagePath}?plan_id=${encodeURIComponent(planId)}` : pagePath;
+      const redirectPath = `${pagePath}?plan_id=${encodeURIComponent(plan.plan_code)}`;
       const code = crypto.randomBytes(32).toString('hex');
       const codeHash = crypto.createHash('sha256').update(code).digest('hex');
       const expiresAt = new Date(Date.now() + SSO_DEEPLINK_EXPIRY_SECONDS * 1000);
-      await SsoDeeplinkCode.create({ codeHash, patientId: member.id, companyId: req.apiClient.id, redirectPath, expiresAt });
+      await SsoDeeplinkCode.create({
+        codeHash, patientId: member.id, companyId: req.apiClient.id, redirectPath, expiresAt,
+        memberId: String(member_id).trim(), planCode: plan.plan_code, carePlanId: plan.id,
+      });
 
       const baseUrl = String(PATIENT_FRONTEND_URL || '').replace(/\/+$/, '');
       const redirect_url = `${baseUrl}/deeplink?code=${code}`;
@@ -432,9 +479,11 @@ class AuthController {
           gender: gender || member.gender,
           dob: dob || member.dateofbirth,
         },
-        planId: planId || null,
+        planId: plan.plan_code,
+        plan: AuthController.deeplinkPlanDetails(plan),
       });
     } catch (error) {
+      console.log(error);
       AuthController.logAuthError(error, req);
       return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
     }
@@ -528,11 +577,27 @@ class AuthController {
       if (!AuthController.isAllowedDeeplinkPath(deeplinkCode.redirectPath)) {
         return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_deeplink);
       }
+
+      // the link only works for the member and the plan it was created for (codes without them are from before
+      // member/plan were stored and are refused); the member id must still be this patient's
+      if (!deeplinkCode.memberId || !deeplinkCode.planCode || !deeplinkCode.carePlanId
+          || !await PatientService.patientHasMemberId(patient.id, deeplinkCode.memberId)) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_401_UNAUTHORIZED, messages.sso_invalid_deeplink);
+      }
+      // the plan must still be assigned to the company and usable today, and still be the same plan row
+      const { plan } = await CarePlanService.getAllowedCompanyPlan(deeplinkCode.planCode, AuthController.deeplinkPlanCompanies(deeplinkCode.companyId, accountHolder));
+      if (!plan || Number(plan.id) !== Number(deeplinkCode.carePlanId)) {
+        return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_403_FORBIDDEN, messages.sso_plan_no_longer_valid);
+      }
+
       const baseUrl = String(PATIENT_FRONTEND_URL || '').replace(/\/+$/, '');
+      // the allowed plan goes into the signed login token (ssoPlanId = the plan_id the client sent, ssoCarePlanId =
+      // careplans.id) so later calls can check that only this plan is used, and is returned for the frontend
       return await AuthController.ssoLoginResponse(res, patient, {
         redirect_path: deeplinkCode.redirectPath,
         redirect_url: `${baseUrl}${deeplinkCode.redirectPath}`,
-      });
+        plan: AuthController.deeplinkPlanDetails(plan),
+      }, { ssoPlanId: plan.plan_code, ssoCarePlanId: plan.id });
     } catch (error) {
       AuthController.logAuthError(error, req);
       return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);

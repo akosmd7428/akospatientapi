@@ -296,6 +296,48 @@ const getCarePlanDetailsByCompanyId = async (companyId, patientId) => {
     return carePlan;
 };
 
+// today in India as YYYY-MM-DD, the format careplans.validFrom / validUpto are stored in
+const todayInIndia = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+// careplans dates are stored as YYYY-MM-DD or DD-MM-YYYY (both are in the data), returned as YYYY-MM-DD;
+// '' for an empty date (no limit) and null for a date that cannot be read
+const planDate = (value) => {
+    const text = String(value ?? '').trim();
+    if (!text) return '';
+    let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    m = /^(\d{2})[-/](\d{2})[-/](\d{4})$/.exec(text);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    return null;
+};
+
+/*
+ * The care plan with this plan_code, when it may be used by a member of one of `companyIds`:
+ * assigned to one of those companies (careplans.companyId), active, not deleted and inside its validity dates.
+ * Returns { plan } or { reason } with reason one of: not_found, other_company, inactive, not_started, expired.
+ */
+const getAllowedCompanyPlan = async (planCode, companyIds) => {
+    const code = String(planCode || '').trim();
+    if (!code) return { reason: 'not_found' };
+    const [plan] = await sequelizeDB1.query(
+        `SELECT id, plan_code, packageName, companyId, care_plan_id, isActive, isDeleted, validFrom, validUpto
+         FROM carePlans WHERE plan_code = :code LIMIT 1`,
+        { replacements: { code }, type: sequelizeDB1.QueryTypes.SELECT }
+    );
+    if (!plan) return { reason: 'not_found' };
+    const allowedCompanies = (companyIds || []).map(Number).filter(Boolean);
+    if (!allowedCompanies.includes(Number(plan.companyId))) return { reason: 'other_company' };
+    if (Number(plan.isActive) !== 1 || Number(plan.isDeleted) === 1) return { reason: 'inactive' };
+    const today = todayInIndia();
+    const from = planDate(plan.validFrom);
+    const upto = planDate(plan.validUpto);
+    // a date that cannot be read is treated as not usable rather than as "no limit"
+    if (from === null || upto === null) return { reason: 'inactive' };
+    if (from && today < from) return { reason: 'not_started' };
+    if (upto && today > upto) return { reason: 'expired' };
+    return { plan };
+};
+
 module.exports = {
     getCarePlanDetailsByCompanyId,
+    getAllowedCompanyPlan,
 };
