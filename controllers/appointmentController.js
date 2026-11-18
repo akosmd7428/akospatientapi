@@ -33,17 +33,21 @@ class AppointmentController {
 
             // await AppointmentService.checkAppointment(patientId, doctorId, date, time,is_paid);
             const existing = await AppointmentService.checkAppointment(patientId, doctorId, date, time,is_paid);
-            // already booked with this doctor at this date and time: only the message, no error and no new booking
+            // already booked with this doctor at this date and time: 409 Conflict with the message, no new booking
             if (existing && existing.alreadyExists) {
-                return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'An appointment already exists', { appointment: existing.appointment, alreadyExists: true });
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_409_CONFLICT, 'An appointment already exists');
             }
-            // another doctor is already booked at this date and time: only the message, no error and no new booking
+            // another doctor is already booked at this date and time: 409 Conflict with the message, no new booking
             if (existing && existing.existsWithOtherDoctor) {
-                return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'An appointment exists with a different doctor.', { appointment: existing.appointment, existsWithOtherDoctor: true });
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_409_CONFLICT, 'An appointment exists with a different doctor.');
             }
             const appointment = await AppointmentService.bookAppointment(appointmentData);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.appointmentBooked, { appointment });
         } catch (error) {
+            // slot already booked (same or another doctor): 409 with the message, not a server error
+            if (error.statusCode === STATUS_CODE.HTTP_409_CONFLICT) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_409_CONFLICT, error.message);
+            }
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }
@@ -54,16 +58,20 @@ class AppointmentController {
             const patientId = req.user.id;
             const rn = await AppointmentService.checkAppointment(patientId, doctorId, date, time,is_paid);
             if (rn && rn.alreadyExists) {
-                return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'An appointment already exists', { alreadyExists: true });
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_409_CONFLICT, 'An appointment already exists');
             }
             if (rn && rn.existsWithOtherDoctor) {
-                return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'An appointment exists with a different doctor.', { existsWithOtherDoctor: true });
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_409_CONFLICT, 'An appointment exists with a different doctor.');
             }
             if(rn === 1){
                  return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.noAppointmentsFound, {  });
             }
-            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.noAppointmentsFound, {  });           
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.noAppointmentsFound, {  });
         } catch (error) {
+            // slot already booked (same or another doctor): 409 with the message, not a server error
+            if (error.statusCode === STATUS_CODE.HTTP_409_CONFLICT) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_409_CONFLICT, error.message);
+            }
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }

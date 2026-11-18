@@ -337,7 +337,30 @@ const getAllowedCompanyPlan = async (planCode, companyIds) => {
     return { plan };
 };
 
+// the plan a company member uses without a deeplink: the newest care plan of one of `companyIds` that is active,
+// not deleted, inside its validity dates today and (when planKey is given) has an active subscriptionPlans row for
+// that service; { plan } or {} when there is none
+const getActiveCompanyPlan = async (companyIds, planKey = null) => {
+    const ids = (companyIds || []).map(Number).filter(Boolean);
+    if (!ids.length) return {};
+    const plans = await sequelizeDB1.query(
+        `SELECT cp.plan_code FROM careplans cp
+         WHERE cp.companyId IN (:ids) AND cp.isActive = 1 AND cp.isDeleted = 0 AND cp.plan_code IS NOT NULL AND cp.plan_code <> ''
+           ${planKey ? 'AND EXISTS (SELECT 1 FROM subscriptionPlans sp WHERE sp.packageId = cp.id AND sp.planKey = :planKey AND sp.isActive = 1 AND sp.isDeleted = 0)' : ''}
+         ORDER BY cp.id DESC`,
+        { replacements: { ids, planKey }, type: sequelizeDB1.QueryTypes.SELECT }
+    );
+    for (const row of plans) {
+        const { plan } = await getAllowedCompanyPlan(row.plan_code, ids);
+        if (plan) return { plan };
+    }
+    return {};
+};
+
 module.exports = {
     getCarePlanDetailsByCompanyId,
     getAllowedCompanyPlan,
+    getActiveCompanyPlan,
+    planDate,
+    todayInIndia,
 };

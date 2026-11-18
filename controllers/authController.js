@@ -597,6 +597,7 @@ class AuthController {
         redirect_path: deeplinkCode.redirectPath,
         redirect_url: `${baseUrl}${deeplinkCode.redirectPath}`,
         plan: AuthController.deeplinkPlanDetails(plan),
+        embed_pharmacy: true,
       }, { ssoPlanId: plan.plan_code, ssoCarePlanId: plan.id });
     } catch (error) {
       AuthController.logAuthError(error, req);

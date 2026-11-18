@@ -1,5 +1,7 @@
 const express = require('express');
 const LabTestController = require('../controllers/labTestController');
+const PlanServiceController = require('../controllers/planServiceController');
+const planRoute = require('../helpers/planRoute');
 const jwtAuth = require('../middleware/jwtAuth'); // Middleware to check JWT
 const validateSchema = require('../middleware/validateSchema');
 const { addToCartSchema } = require('../validation/cartValidator');
@@ -42,7 +44,7 @@ router.delete('/remove/:cartId', jwtAuth, validateDataEncryption(), LabTestContr
 router.get('/prescription/:patientId', patientOrCareNavigator, validateDataEncryption(), LabTestController.getPrescriptionUrl);
 router.delete('/prescription/:prescriptionId', patientOrCareNavigator, LabTestController.deletePrescription);
 router.post('/order', jwtAuth, validateDataEncryption(), LabTestController.createLabOrder);
-router.get('/orders/:orderId', jwtAuth, LabTestController.getLabOrdersByPatient);
+router.get('/orders/:orderId', jwtAuth, planRoute(PlanServiceController.getLabOrdersByPatient, LabTestController.getLabOrdersByPatient));
 router.put('/order/reschedule', jwtAuth, validateDataEncryption(), LabTestController.rescheduleLabOrder);
 router.put('/order', jwtAuth, validateDataEncryption(), LabTestController.updateLabOrder);
 router.get('/list/:patientId', jwtAuth, validateDataEncryption(), LabTestController.getLabOrders);
@@ -50,8 +52,8 @@ router.delete('/cartRemove/:cartId', jwtAuth, validateDataEncryption(), LabTestC
 router.put('/cart', jwtAuth, validateDataEncryption(), LabTestController.updateLabId);
 router.get('/labDetail/:cartId', jwtAuth, validateDataEncryption(), LabTestController.getLabDetail);
 router.get('/cart/sub-city-prices/:cartId', jwtAuth, validateDataEncryption(), LabTestController.getSubCityCartPrices);
-router.post('/purchaseLabTest', jwtAuth, validateDataEncryption(), LabTestController.purchaseLabTest);
-router.post('/purchaseLabTestMobile', jwtAuth, validateDataEncryption(), LabTestController.purchaseLabTestMobile);
+router.post('/purchaseLabTest', jwtAuth, validateDataEncryption(), planRoute(PlanServiceController.purchaseLabTest, LabTestController.purchaseLabTest));
+router.post('/purchaseLabTestMobile', jwtAuth, validateDataEncryption(), planRoute(PlanServiceController.purchaseLabTestMobile, LabTestController.purchaseLabTestMobile));
 
 router.post('/labtestnotification', jwtAuth, LabTestController.labtestNotification);
 router.post('/re-schedule-lab', patientOrCareNavigator, validateDataEncryption(), LabTestController.labReschedule);
@@ -72,7 +74,7 @@ router.post('/fetchRedcliffReport', verifyRedcliffWebhook, LabTestController.get
 
 router.get('/sub-cities/:cityId', jwtAuth, validateDataEncryption(),LabTestController.getSubCitiesByCityId);
 router.get('/patient-company-details', jwtAuth, validateDataEncryption(),LabTestController.getPatientCompanyDetails);
-router.get('/check-payment-status', jwtAuth, validateDataEncryption(),LabTestController.checkCallPaymentStatus);
+router.get('/check-payment-status', jwtAuth, validateDataEncryption(), planRoute(PlanServiceController.checkCallPaymentStatus, LabTestController.checkCallPaymentStatus));
 router.post('/create-payment-call', jwtAuth, validateDataEncryption(),LabTestController.postPaymentCall);
 router.post('/verify-call-coupon', jwtAuth, validateDataEncryption(),LabTestController.verifyCallCoupan);
 router.post('/paymentStatusCallCheck', jwtAuth, validateDataEncryption(),LabTestController.paymentStatusCallCheck);

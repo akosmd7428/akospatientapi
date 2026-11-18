@@ -1,11 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const AppointmentController = require('../controllers/appointmentController');
+const PlanServiceController = require('../controllers/planServiceController');
+const planRoute = require('../helpers/planRoute');
 const { bookAppointmentValidation, rescheduleAppointmentValidation, cancelAppointmentValidation } = require('../validation/bookAppointmentValidation');
 const validateSchema = require('../middleware/validateSchema');
 const jwtAuth = require('../middleware/jwtAuth');
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
-router.post('/book', jwtAuth, validateDataEncryption(), validateSchema(bookAppointmentValidation), AppointmentController.bookAppointment);
+router.post('/book', jwtAuth, validateDataEncryption(), validateSchema(bookAppointmentValidation), planRoute(PlanServiceController.bookAppointment, AppointmentController.bookAppointment));
 router.get('/get/:status', jwtAuth, validateDataEncryption(), AppointmentController.getAppointments);
 router.get('/my-medicines', jwtAuth, validateDataEncryption(), AppointmentController.myMedicines);
 

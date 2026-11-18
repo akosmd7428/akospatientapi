@@ -3,6 +3,7 @@ const axios = require('axios');
 const { sequelizeDB1 } = require('../config/sequelize');
 const { QueryTypes } = require('sequelize');
 const { APPOINTMENT_STATUS } = require('../config/secret');
+const { STATUS_CODE } = require('../config/constant');
 const Medicine = require('../models/medicine');
 const { Op } = require('sequelize');
 const Patient = require('../models/patientModel');
@@ -63,8 +64,11 @@ class AppointmentService {
         });
         //  isActive: true, comment for the not exist
          // isConfirmed: true,
+        // a booking conflict is the client's case, not a server error: 409 with the message
         if (existingAppointment) {
-            throw new Error('An appointment already exists');
+            const conflict = new Error('An appointment already exists');
+            conflict.statusCode = STATUS_CODE.HTTP_409_CONFLICT;
+            throw conflict;
         }
 
         // Check if an appointment exists with the same date and time but a different doctor
@@ -81,7 +85,9 @@ class AppointmentService {
         });
         // isActive: true,
         if (conflictingAppointment) {
-            throw new Error('An appointment exists with a different doctor.');
+            const conflict = new Error('An appointment exists with a different doctor.');
+            conflict.statusCode = STATUS_CODE.HTTP_409_CONFLICT;
+            throw conflict;
         }
         
         return 1;

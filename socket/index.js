@@ -9,6 +9,8 @@ const { QueryTypes } = require('sequelize');
 const CallEvents = require('./callEvents');
 const { verifyOhcCallToken } = require('./ohcCallToken');
 const { PATIENT_BACKEND_URL } = require('../config/secret');
+const SubscriptionUsage = require('../services/subscriptionUsageService');
+const { messages } = require('../config/language');
 
 const { USER_TYPE, toPositiveInt } = ChatService;
 
@@ -385,6 +387,13 @@ io.on("connection", (socket) => {
     const call = toPositiveInt(callId);
     if (!call) return reply(INVALID);
 
+    // add-on (company with is_plan_id_verify = 1): the plan's free calls are used up and the call is not paid -> the
+    // doctors are not rung, the patient is told to pay (402)
+    const planCheck = await SubscriptionUsage.checkPractitionerCall(me.id, call);
+    if (!planCheck.allowed) {
+      return reply({ success: false, status: 402, paymentRequired: true, error: messages.planCallPaymentRequired });
+    }
+
     // same function as the ohc-sync api, doctors come from the server, client connectDoctorIds/groupIds are ignored
     await CallEvents.incomingCallTalkToDoctor(io, me.id, call);
     reply({ success: true });
@@ -430,12 +439,19 @@ io.on("connection", (socket) => {
     if (Number(callDetails.doctor_id) !== me.id && !ownConnectIds.includes(Number(callDetails.connected_doctorId))) {
       return reply(DENIED);
     }
+    // add-on (company with is_plan_id_verify = 1): free calls used up and the call is not paid -> not accepted
+    const planCheck = await SubscriptionUsage.checkPractitionerCall(patientId);
+    if (!planCheck.allowed) {
+      return reply({ success: false, status: 402, paymentRequired: true, error: messages.planCallNotPaid });
+    }
     const data = {
       callDetails
     };
     // the patient app, and the ohc portal when the call was made from there
     io.to(userRoom(ROLES.PATIENT, patientId)).to(ohcCallRoom(patientId)).emit('acceptedCallRecordFront', data);
     reply({ success: true, data });
+    // add-on: the call was taken, count it against the patient's care plan (only for a company with is_plan_id_verify = 1)
+    await SubscriptionUsage.takePractitionerCall(patientId);
   });
 
   on('declinefromPatient', [ROLES.PATIENT], async ({ doctorId, connectDocId }, reply) => {

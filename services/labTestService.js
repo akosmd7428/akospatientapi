@@ -2150,6 +2150,10 @@ static async getLabOrdersByPatientId(orderId) {
             const hasAlreadyUsedFree =
                 Number(alreadyOrdered) === 1;
 
+            
+
+            
+
             const isFree =
                 !isDependent &&
                 !isCompanyPackagePaid &&
