@@ -9,7 +9,7 @@ const jwtAuth = require('../middleware/jwtAuth');
 const  validateDataEncryption  = require('../middleware/validateDataEncryption');
 router.post('/book', jwtAuth, validateDataEncryption(), validateSchema(bookAppointmentValidation), planRoute(PlanServiceController.bookAppointment, AppointmentController.bookAppointment));
 router.get('/get/:status', jwtAuth, validateDataEncryption(), AppointmentController.getAppointments);
-router.get('/my-medicines', jwtAuth, validateDataEncryption(), AppointmentController.myMedicines);
+router.get('/my-medicines', jwtAuth, validateDataEncryption(), planRoute(PlanServiceController.myMedicines, AppointmentController.myMedicines));
 
 router.post('/reschedule', jwtAuth, validateDataEncryption(), validateSchema(rescheduleAppointmentValidation), AppointmentController.rescheduleAppointment);
 router.post('/cancel', jwtAuth, validateDataEncryption(), validateSchema(cancelAppointmentValidation), AppointmentController.cancelAppointment);

@@ -4,6 +4,7 @@ const CarePlanService = require('../services/carePlanService');
 const PatientService = require('../services/patientService');
 const PatientCareTeamService = require('../services/patientCareTeamService');
 const SubscriptionUsage = require('../services/subscriptionUsageService');
+const AppointmentController = require('./appointmentController');
 const LabOrder = require('../models/labOrder');
 const CommonHelper = require('../helpers/commonHelper');
 const { messages } = require('../config/language');
@@ -174,6 +175,34 @@ class PlanServiceController {
             if (error.statusCode === STATUS_CODE.HTTP_409_CONFLICT) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_409_CONFLICT, error.message);
             }
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
+    }
+
+    // GET /care/plan-value: plan values of the logged in user, from the care plan assigned to the user's company
+    // (services/subscriptionUsageService.js getPlanSummary). 404 when the company has no active care plan
+    static async getPlanValue(req, res) {
+        try {
+            const data = await SubscriptionUsage.getPlanSummary(req.user);
+            if (!data) {
+                return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.planNotAssigned);
+            }
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { data });
+        } catch (error) {
+            console.error('[subscription] plan value failed:', error.message);
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError);
+        }
+    }
+
+    // GET /appointment/my-medicines (company with is_plan_id_verify = 1): the existing response plus planValue, the plan
+    // values of the logged in user (same object as /care/plan-value). No plan assigned: the existing response unchanged
+    static async myMedicines(req, res, existing) {
+        const planValue = await SubscriptionUsage.getPlanSummary(req.user);
+        if (!planValue) return existing();
+        try {
+            const formattedMedicines = await AppointmentController.getFormattedMedicines(req);
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.medicinesFetched, { formattedMedicines, planValue });
+        } catch (error) {
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
         }
     }

@@ -152,7 +152,7 @@ class AcrossAssistService {
         const payload = {
             booking_id: bookingId,
             appointment_id: text(order.id),
-            customer_id: text(order.patientId),
+            customer_id: text(order.member_id),
             customer_name: `${text(order.first_name)} ${text(order.last_name)}`.trim(),
             mobile_number: text(order.phone),
             // the sso client's own id of the member, sent on /sso-client-login
@@ -160,7 +160,7 @@ class AcrossAssistService {
             appointment_date_time: [text(order.bookingDate), text(order.bookingTime)].filter(Boolean).join(' '),
             event_timestamp: Date.now(),
             booking_source: 'AkosMD',
-            service_type: 'lab_test',
+            service_type: 'client_lab_test',
             status: text(order.orderStatus),
             status_text: text(order.orderStatus),
             provider_id: amount(order.labId),
@@ -178,7 +178,7 @@ class AcrossAssistService {
             },
             order_id: bookingId,
             ordered_for_name: `${text(order.first_name)} ${text(order.last_name)}`.trim(),
-            order_type: 'lab_test',
+            order_type: 'client_lab_test',
             vendor_name: text(order.labName || order.labType),
             status_description: text(order.orderStatus),
             order_items: items.map(item => ({
@@ -208,7 +208,7 @@ class AcrossAssistService {
 
     static basePatientPayload(patient) {
         return {
-            customer_id: text(patient.id),
+            customer_id: text(patient.member_id),
             customer_name: fullName(patient),
             mobile_number: text(patient.phone),
             // the sso client's own id of the member, sent on /sso-client-login
@@ -263,8 +263,8 @@ class AcrossAssistService {
             booking_id: text(appointment.id),
             appointment_id: text(appointment.id),
             appointment_date_time: [text(appointment.date), text(appointment.time)].filter(Boolean).join(' '),
-            service_type: WEBHOOK_SOURCES.DOCTOR_APPOINTMENT,
-            order_type: WEBHOOK_SOURCES.DOCTOR_APPOINTMENT,
+            service_type: 'client_book_appointment',
+            order_type: 'client_book_appointment',
             type: 'doctor_appointment',
             status,
             status_text: status,
@@ -292,8 +292,8 @@ class AcrossAssistService {
             booking_id: text(call.id),
             appointment_id: text(call.id),
             appointment_date_time: [text(call.call_date), text(call.call_time)].filter(Boolean).join(' '),
-            service_type: WEBHOOK_SOURCES.TALK_TO_DOCTOR,
-            order_type: WEBHOOK_SOURCES.TALK_TO_DOCTOR,
+            service_type: 'client_talk_to_doctor',
+            order_type: 'client_talk_to_doctor',
             type: 'talk_to_doctor',
             status: text(call.order_status),
             status_text: text(call.order_status),

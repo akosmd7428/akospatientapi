@@ -412,4 +412,70 @@ const isPlanVerifyPatient = async (patientId) => {
     return !!company && (Number(company.is_plan_id_verify) === 1 || Number(company.parent_is_plan_id_verify) === 1);
 };
 
-module.exports = { SERVICES, isService, isPlanVerifyPatient, periodStart, getAllowance, useFree, release, setReference, notePractitionerCall, takePractitionerCall, checkPractitionerCall, unusedCallPayment };
+/*
+ * Plan values of the logged in patient: the care plan assigned to the patient's company (the deeplink login's plan,
+ * else the company's newest active plan valid today) and each of its subscriptionPlans rows (planValue). used /
+ * remaining per patient per period are only counted when the company has is_plan_id_verify = 1 (only then the plan
+ * gives free services), else they are null. null when no plan is assigned.
+ */
+const getPlanSummary = async (user) => {
+    if (!user || user.role !== 'patient') return null;
+    const company = await getPatientCompany(user.id);
+    if (!company) return null;
+    const planVerify = Number(company.is_plan_id_verify) === 1 || Number(company.parent_is_plan_id_verify) === 1;
+    const companyIds = [company.id, company.parent_id];
+    const resolved = await resolvePlan(user, companyIds, null);
+    if (!resolved) return null;
+    const { plan, source } = resolved;
+
+    const planRows = (carePlanId) => sequelizeDB1.query(
+        `SELECT id, planKey, planValue, planType FROM subscriptionPlans
+         WHERE packageId = :carePlanId AND isActive = 1 AND isDeleted = 0
+         ORDER BY id`,
+        { replacements: { carePlanId }, type: QueryTypes.SELECT }
+    );
+    // the rows of the plan, then for labTests / careAppointment / practitioner the plan the free services really use
+    // (without a deeplink: the company's newest valid plan that has the service, it can be another plan of the company)
+    const entries = new Map();
+    for (const row of await planRows(plan.id)) if (!entries.has(row.planKey)) entries.set(row.planKey, { row, plan });
+    if (source === 'company') {
+        for (const key of Object.values(SERVICES)) {
+            const forService = await resolvePlan(user, companyIds, key);
+            if (!forService || Number(forService.plan.id) === Number(plan.id)) continue;
+            const row = (await planRows(forService.plan.id)).find(r => r.planKey === key);
+            if (row) entries.set(key, { row, plan: forService.plan });
+        }
+    }
+
+    const services = [];
+    for (const [key, { row, plan: rowPlan }] of entries) {
+        const planValue = toCount(row.planValue);
+        const start = periodStart(row.planType, rowPlan.validFrom);
+        const counted = planVerify && isService(key);
+        const used = counted ? await countUses(row.id, user.id, start, undefined, key, rowPlan.id) : null;
+        services.push({
+            service: key,
+            plan_value: planValue,
+            used,
+            remaining: counted ? Math.max(0, planValue - used) : null,
+            plan_type: row.planType === null || row.planType === undefined ? null : Number(row.planType),
+            period_start: start,
+            plan_id: String(rowPlan.plan_code),
+            care_plan_id: rowPlan.id,
+        });
+    }
+    return {
+        is_plan_id_verify: planVerify ? 1 : 0,
+        plan: {
+            plan_id: String(plan.plan_code),
+            care_plan_id: plan.id,
+            name: plan.packageName || null,
+            valid_from: plan.validFrom || null,
+            valid_upto: plan.validUpto || null,
+            source,
+        },
+        services,
+    };
+};
+
+module.exports = { SERVICES, isService, getPlanSummary, isPlanVerifyPatient, periodStart, getAllowance, useFree, release, setReference, notePractitionerCall, takePractitionerCall, checkPractitionerCall, unusedCallPayment };

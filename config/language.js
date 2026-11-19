@@ -42,6 +42,7 @@ const messages = {
     doctorsFetched: "Doctors fetched successfully",
     doctorsAdded: "Care Team added successfully",
     appointmentBooked: "Appointment booked successfully",
+    planNotAssigned: "No active care plan is assigned to your company.",
     planAppointmentPaymentRequired: "You have used all the free appointments of your plan. Please pay to book this appointment.",
     planCallPaymentRequired: "You have used all the free doctor calls of your plan. Please pay to talk to the doctor.",
     planCallNotPaid: "This patient has used all the free doctor calls of the plan and has not paid for this call.",

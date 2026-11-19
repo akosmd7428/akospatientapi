@@ -209,8 +209,8 @@ class AppointmentController {
     }
     
 
-    static async myMedicines(req, res, next) {
-        try {
+    // the logged in patient's medicines as /appointment/my-medicines returns them (also used by the plan handler)
+    static async getFormattedMedicines(req) {
             let { search, timeFilter } = req.query;
             const patientId = req.user.id;
         
@@ -238,7 +238,12 @@ class AppointmentController {
                     profilePic
                 };
             });
+            return formattedMedicines;
+    }
 
+    static async myMedicines(req, res, next) {
+        try {
+            const formattedMedicines = await AppointmentController.getFormattedMedicines(req);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.medicinesFetched, { formattedMedicines });
         } catch (error) {
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
