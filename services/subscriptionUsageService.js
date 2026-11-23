@@ -464,8 +464,14 @@ const getPlanSummary = async (user) => {
             care_plan_id: rowPlan.id,
         });
     }
+    const [patientRow] = await sequelizeDB1.query(
+        'SELECT member_id FROM patient WHERE id = :patientId LIMIT 1',
+        { replacements: { patientId: user.id }, type: QueryTypes.SELECT }
+    );
+
     return {
         is_plan_id_verify: planVerify ? 1 : 0,
+        member_id: patientRow ? patientRow.member_id : null,
         plan: {
             plan_id: String(plan.plan_code),
             care_plan_id: plan.id,

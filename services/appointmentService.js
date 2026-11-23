@@ -13,6 +13,7 @@ const EmailTemplates = require('../helpers/emailTemplates');
 const { sendSms } = require('./smsService');
 const CareNavigator = require('../models/careNavigatorModel');
 const NotificationService = require('./notificationService');
+const AcrossAssistService = require('./acrossAssistService');
 
 class AppointmentService {
     static async bookAppointment(data) {
@@ -30,6 +31,8 @@ class AppointmentService {
             const patientSMSMsg = `Hi ${patientName}, your requested appointment with AkosMD for ${appointment.date} at ${appointment.time} is awaiting confirmation, We will update you upon confirmation.`;
            // patient.phone = '9711500543';
             await sendSms(patient.phone, patientSMSMsg, "1007457160894207069");
+
+            AcrossAssistService.sendWebhook(AcrossAssistService.SOURCES.DOCTOR_APPOINTMENT, appointment.id, 'booked');
 
             return appointment;
         } catch (error) {
@@ -319,7 +322,7 @@ class AppointmentService {
 
     static async getMyMedicines(patientId, status, searchQuery, timeFilter) {
         let query = `
-           SELECT 
+           SELECT
             a.id as medicineId,
             a.patientId,
             d.name as doctorName,
@@ -329,13 +332,13 @@ class AppointmentService {
             a.time,
             p.prescriptionURL,
             d.profilePic
-        FROM 
+        FROM
             appointments a
-        JOIN 
+        JOIN
             doctor d ON a.doctorId = d.id
-        JOIN 
+        JOIN
             tbl_prescription p ON a.id = p.appointmentId
-        WHERE 
+        WHERE
             a.patientId = :patientId 
             AND a.isConfirmed = true 
             AND a.isActive = true 
@@ -449,6 +452,9 @@ class AppointmentService {
                 "role" : "doctor"
             }
             NotificationService.createNotification(doctorNotifyData);
+
+            AcrossAssistService.sendWebhook(AcrossAssistService.SOURCES.DOCTOR_APPOINTMENT, appointmentId, 'cancelled');
+
             return updatedAppointment;
         } catch (error) {
             throw new Error('Error canceling appointment');
@@ -513,6 +519,8 @@ class AppointmentService {
                     "role" : "doctor"
                 }
                 NotificationService.createNotification(doctorNotifyData);
+
+                AcrossAssistService.sendWebhook(AcrossAssistService.SOURCES.DOCTOR_APPOINTMENT, appointmentId, 'confirmed');
             }
             else{
                 updatedAppointment = await Appointment.update(
@@ -554,6 +562,8 @@ class AppointmentService {
                     "role" : "doctor"
                 }
                 NotificationService.createNotification(doctorNotifyData);
+
+                AcrossAssistService.sendWebhook(AcrossAssistService.SOURCES.DOCTOR_APPOINTMENT, appointmentId, 'cancelled');
             }
             return updatedAppointment;
         } catch (error) {

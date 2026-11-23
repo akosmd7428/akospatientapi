@@ -2586,6 +2586,10 @@ static async getLabOrdersByPatientId(orderId) {
                 .catch((err) => console.error('Patient notification failed:', err));
             this.notifyCareNavigators(patient, emailData, 'cancelled', { cancelledBy: options.cancelledBy })
                 .catch((err) => console.error('Care navigator notification failed:', err));
+
+            if (orderDetailPrev && orderDetailPrev.orderStatus !== status) {
+                AcrossAssistService.sendWebhook(AcrossAssistService.SOURCES.LAB_TEST, orderId, status);
+            }
         }
         if(status == "Completed"){ // Send Notifications
             const emailData = await this.getHealthCheckupEmailData(orderDetail, patient);
@@ -3988,7 +3992,7 @@ static async getLabOrdersByPatientId(orderId) {
         }
         if(status == "Completed"){ // Send Notifications
             const patientName = patient.first_name +' '+patient.last_name;
-            await emailHelperSMTP(orderDetail.patient_id, patient.email, ...Object.values(EmailTemplates.bookingStatusPatient({ name: patientName, status: 'completed', bookingType: 'Call' })));      
+            await emailHelperSMTP(orderDetail.patient_id, patient.email, ...Object.values(EmailTemplates.bookingStatusPatient({ name: patientName, status: 'completed', bookingType: 'Call' })));
             // Create SMS messages with dynamic content
             // const patientSMSMsg = `Hi ${patientName}, We are pleased to inform you that your lab test booking has been Completed. Team AkosMD`;
 
@@ -4001,6 +4005,10 @@ static async getLabOrdersByPatientId(orderId) {
                 "role" : "patient"
             }
             NotificationService.createNotification(patientNotifyData);
+
+            if (Number(orderDetail.call_type) === 1) {
+                AcrossAssistService.sendWebhook(AcrossAssistService.SOURCES.TALK_TO_DOCTOR, orderId, 'completed');
+            }
         }
         if(status == "Report Generated"){ // Send Notifications
             const patientName = patient.first_name +' '+patient.last_name;
