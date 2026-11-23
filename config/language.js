@@ -142,6 +142,7 @@ const messages = {
     sso_plan_no_longer_valid: "The plan of this link is no longer available.",
     connect_code_generated: "Connect access code generated successfully.",
     connect_invalid_code: "Invalid or expired connect access code.",
+    familyMembersFetched: "Family members fetched successfully.",
     invaliddomain: "Domain is in-valid.",
 };
 

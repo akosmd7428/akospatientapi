@@ -20,6 +20,7 @@ router.post('/profile', jwtAuth, validateDataEncryption(), PatientController.cre
 router.get('/details/:patientEmail',validateDataEncryption(), PatientController.getPatientDetails);
 router.post('/updateProfile', authorize(ROLES.PATIENT, ROLES.CARE_NAVIGATOR), validateDataEncryption(), careNavigatorScope, PatientController.updateProfile);
 router.get('/patientSignIn', jwtAuth, validateDataEncryption(), PatientController.patientSignIn);
+router.get('/family-members', jwtAuth, validateDataEncryption(), PatientController.getFamilyMembers);
 router.post('/notes', jwtAuth, validateDataEncryption(), PatientController.updateNotes);
 
 module.exports = router;

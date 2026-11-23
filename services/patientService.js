@@ -1666,6 +1666,51 @@ class PatientService {
         );
         return rows[0] ? Patient.findOne({ where: { id: rows[0].id } }) : null;
     }
+    static async getFamilyMembersList(patientId) {
+        const patient = await Patient.findOne({ where: { id: patientId }, attributes: ['id', 'parent_id'] });
+        if (!patient) {
+            throw new Error('Patient not found');
+        }
+
+        const isDependent = Number(patient.parent_id) > 0;
+        const parentId = isDependent ? patient.parent_id : patient.id;
+
+        const query = `
+            SELECT
+                p.id,
+                TRIM(CONCAT(p.first_name, ' ', IFNULL(p.last_name, ''))) AS name,
+                p.parent_id,
+                pd.profile_image
+            FROM patient p
+            LEFT JOIN patientDetails pd ON p.id = pd.patientId
+            WHERE p.id = :parentId OR p.parent_id = :parentId
+            ORDER BY p.parent_id ASC, p.first_name ASC
+        `;
+
+        const rows = await sequelizeDB1.query(query, {
+            replacements: { parentId },
+            type: QueryTypes.SELECT,
+        });
+
+        return rows.map(row => {
+            let relation;
+            if (row.id === patientId) {
+                relation = 'Self';
+            } else if (Number(row.parent_id) === 0) {
+                relation = 'Parent';
+            } else {
+                relation = 'Dependent';
+            }
+            return {
+                id: row.id,
+                name: row.name,
+                label: `${row.name} (${relation})`,
+                relation,
+                profile_image: row.profile_image || null,
+            };
+        });
+    }
+
     // true when the patient row still carries this member id (member_id is not mapped on the Patient model)
     static async patientHasMemberId(patientId, memberId) {
         if (!patientId || memberId === undefined || memberId === null || String(memberId).trim() === '') return false;

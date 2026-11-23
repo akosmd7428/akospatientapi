@@ -442,6 +442,15 @@ class PatientController {
         }
     };
     
+    static async getFamilyMembers(req, res) {
+        try {
+            const familyMembers = await PatientService.getFamilyMembersList(req.user.id);
+            return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.familyMembersFetched, { familyMembers });
+        } catch (error) {
+            return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
+        }
+    }
+
     static async patientSignIn(req, res, next) {
         try {
           let userDetails;
