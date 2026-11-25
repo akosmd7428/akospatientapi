@@ -31,6 +31,9 @@ const ohcSyncRoutes = require('./routes/ohcSyncRoutes');
 const connectAccessRoutes = require('./routes/connectAccessRoutes');
 const portalModuleRoutes = require('./routes/portalModuleRoutes');
 const acrossAssistRoutes = require('./routes/acrossAssistRoutes');
+const abdmRoutes = require('./abdm/routes/abdmRoutes');
+const abdmCallbackRoutes = require('./abdm/routes/callbackRoutes');
+require('./abdm/models'); // Load ABDM models and associations for Sequelize sync
 const initSocket = require('./socket');
 const cors = require('cors');
 
@@ -80,7 +83,7 @@ const corsOptions = {
   // a trailing "/" in the list is removed, a browser origin never ends with one
   origin: (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim().replace(/\/+$/, '')).filter(Boolean),
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-  allowedHeaders: ['Content-Type', 'Authorization', 'role', 'companyId', 'x-sync-api-key','x-client-id','x-client-secret'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'role', 'companyId', 'x-sync-api-key','x-client-id','x-client-secret','x-token'],
 };
 
 app.use(cors(corsOptions));
@@ -136,6 +139,10 @@ app.use('/api/connect-access', connectAccessRoutes);
 app.use('/api/portal-modules', portalModuleRoutes);
 app.use('/api/across-assist', acrossAssistRoutes);
 
+// ABDM integration routes
+app.use('/api/abdm', abdmRoutes);
+app.use('/api/abdm/callback', abdmCallbackRoutes);
+
 // uploaded files, served as downloads so an uploaded html/svg can never run in the api origin
 app.use('/assets', express.static(path.join(__dirname, 'assets'), {
   dotfiles: 'deny',
@@ -151,7 +158,9 @@ app.use('/assets', express.static(path.join(__dirname, 'assets'), {
 // Error handling middleware (always at the end), logs the error and returns a generic response
 app.use(errorHandler);
 
-sequelizeDB1.sync()
+sequelizeDB1.query('SET FOREIGN_KEY_CHECKS = 0')
+  .then(() => sequelizeDB1.sync())
+  .then(() => sequelizeDB1.query('SET FOREIGN_KEY_CHECKS = 1'))
   .then(() => {
     console.log('Database synced');
     httpServer.listen(PORT, () => {

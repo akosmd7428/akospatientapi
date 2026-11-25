@@ -3,7 +3,7 @@ const {sequelizeDB1} = require('../config/sequelize'); // Adjust the path to you
 
 const Prescription = sequelizeDB1.define('Prescription', {
     prescription_json: {
-        type: DataTypes.JSONB, // Use JSONB type for storing JSON data
+        type: DataTypes.JSON, // Use JSON type for MySQL
         allowNull: true
     },
     prescriptionURL: {

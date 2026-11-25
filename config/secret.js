@@ -41,6 +41,16 @@ const REDCLIFF_KEY = process.env.REDCLIFF_KEY;
 const ACROSS_ASSIST_BASE_URL = process.env.ACROSS_ASSIST_BASE_URL;
 const ACROSS_ASSIST_API_KEY = process.env.ACROSS_ASSIST_API_KEY;
 
+// ABDM (Ayushman Bharat Digital Mission) gateway credentials
+const ABDM_GATEWAY_URL = process.env.ABDM_GATEWAY_URL;
+const ABDM_ABHA_URL = process.env.ABDM_ABHA_URL;
+const ABDM_CLIENT_ID = process.env.ABDM_CLIENT_ID;
+const ABDM_CLIENT_SECRET = process.env.ABDM_CLIENT_SECRET;
+const ABDM_BRIDGE_URL = process.env.ABDM_BRIDGE_URL;
+const ABDM_BRIDGE_ID = process.env.ABDM_BRIDGE_ID;
+const ABDM_HFR_ID = process.env.ABDM_HFR_ID;
+const ABDM_HIP_ID = process.env.ABDM_HIP_ID;
+
 // encryption keys and tokens, never hard-code these in the code
 const DATA_ENCRYPTION_KEY = process.env.DATA_ENCRYPTION_KEY;
 const DATA_ENCRYPTION_IV = process.env.DATA_ENCRYPTION_IV;
@@ -106,5 +116,13 @@ module.exports = {
     AES_SECRET_KEY,
     PRESCRIPTION_LINK_SECRET,
     BITLY_ACCESS_TOKEN,
-    ALGORITHM
+    ALGORITHM,
+    ABDM_GATEWAY_URL,
+    ABDM_ABHA_URL,
+    ABDM_CLIENT_ID,
+    ABDM_CLIENT_SECRET,
+    ABDM_BRIDGE_URL,
+    ABDM_BRIDGE_ID,
+    ABDM_HFR_ID,
+    ABDM_HIP_ID
 };
