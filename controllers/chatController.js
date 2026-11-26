@@ -7,7 +7,7 @@ const { USER_TYPE, toPositiveInt } = ChatService;
 const ROLE_USER_TYPE = { patient: USER_TYPE.PATIENT, doctor: USER_TYPE.DOCTOR, careNavigator: USER_TYPE.CARE_NAVIGATOR };
 
 // the caller is always the token user, client senderId/userId/senderType/userType are ignored
-const chatIdentity = (req) => ({ id: req.user.id, userType: ROLE_USER_TYPE[req.user.role] });
+const chatIdentity = (req) => ({ id: req.selectedPatientId, userType: ROLE_USER_TYPE[req.user.role] });
 
 const ChatController = {
 

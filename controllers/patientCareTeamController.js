@@ -6,7 +6,7 @@ const { messages } = require('../config/language');
 class PatientCareTeamController {
     static async addDoctors(req, res) {
         try {
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
             const doctorIds = req.body.doctorIds;
 
             // only doctors of the companies the patient is connected to can be added
@@ -27,11 +27,13 @@ class PatientCareTeamController {
 
     static async getCareTeam(req, res) {
         try {
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
             const { search } = req.query;
 
+            await PatientCareTeamService.ensureCareTeamExists(patientId);
+
             const result = await PatientCareTeamService.getCareTeam(patientId, search);
-            
+
             return sendSuccess(res, true, STATUS_CODE.HTTP_201_CREATED, messages.careTeamFetched, { result });
         } catch (error) {
             return sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);

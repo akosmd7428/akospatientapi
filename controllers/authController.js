@@ -4,7 +4,7 @@ const ConnectedCompaniesPatient = require('../models/connectedCompaniesPatient')
 const SsoLoginCode = require('../models/ssoLoginCode');
 const SsoDeeplinkCode = require('../models/ssoDeeplinkCode');
 const { messages } = require('../config/language');
-const { STATUS_CODE, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH, SSO_DEEPLINK_PAGES } = require('../config/constant');
+const { STATUS_CODE, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH, SSO_DEEPLINK_PAGES, SSO_DEEPLINK_HISTORY_PAGES } = require('../config/constant');
 const CommonHelper = require('../helpers/commonHelper');
 const { laravelDecrypt } = require('../helpers/laravelCrypt');
 const PatientService = require('../services/patientService');
@@ -378,7 +378,9 @@ class AuthController {
   // a stored deeplink path is only opened when its page is still one of the allowed deeplink pages
   static isAllowedDeeplinkPath(redirectPath) {
     const page = String(redirectPath || '').split('?')[0];
-    return page === SSO_DEFAULT_REDIRECT_PATH || Object.values(SSO_DEEPLINK_PAGES).includes(page);
+    return page === SSO_DEFAULT_REDIRECT_PATH
+      || Object.values(SSO_DEEPLINK_PAGES).includes(page)
+      || Object.values(SSO_DEEPLINK_HISTORY_PAGES).includes(page);
   }
 
   // companies whose care plans a deeplink may use: the api client's company and the member's own company
@@ -465,8 +467,25 @@ class AuthController {
 
       const baseUrl = String(PATIENT_FRONTEND_URL || '').replace(/\/+$/, '');
       const redirect_url = `${baseUrl}/deeplink?code=${code}`;
+
+      const deeplinkKey = String(deeplink || '').trim().toLowerCase();
+      const historyPath = SSO_DEEPLINK_HISTORY_PAGES[deeplinkKey] || null;
+      let view_history_url = null;
+      if (historyPath) {
+        const historyRedirectPath = `${historyPath}?plan_id=${encodeURIComponent(plan.plan_code)}`;
+        const historyCode = crypto.randomBytes(32).toString('hex');
+        const historyCodeHash = crypto.createHash('sha256').update(historyCode).digest('hex');
+        await SsoDeeplinkCode.create({
+          codeHash: historyCodeHash, patientId: member.id, companyId: req.apiClient.id,
+          redirectPath: historyRedirectPath, expiresAt,
+          memberId: String(member_id).trim(), planCode: plan.plan_code, carePlanId: plan.id,
+        });
+        view_history_url = `${baseUrl}/deeplink?code=${historyCode}`;
+      }
+
       return CommonHelper.sendSuccessUnencrypt(res, true, STATUS_CODE.HTTP_200_OK, messages.sso_deeplink_success, {
         redirect_url,
+        view_history_url,
         expires_in: SSO_DEEPLINK_EXPIRY_SECONDS,
         deeplink,
         member: {

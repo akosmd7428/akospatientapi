@@ -10,7 +10,7 @@ class DoctorController {
             const { employer_id } = req.params;
             const { search } = req.query;
             // only the doctors of a company the logged in patient is connected to
-            if (!(await PatientService.isPatientConnectedToCompany(req.user.id, employer_id))) {
+            if (!(await PatientService.isPatientConnectedToCompany(req.selectedPatientId, employer_id))) {
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.doctorsFetched, { doctors: [] });
             }
             const doctors = await DoctorService.getDoctorsByEmployer(employer_id, search);

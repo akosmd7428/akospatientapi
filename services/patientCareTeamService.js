@@ -32,6 +32,35 @@ class PatientCareTeamService {
         return rows.map(row => Number(row.doctorId));
     }
 
+    static async getCompanyDoctorIds(patientId) {
+        const rows = await sequelizeDB1.query(
+            `SELECT DISTINCT de.doctor_id AS doctorId
+             FROM patient p
+             JOIN connectedCompaniesPatient ccp ON ccp.patientId IN (p.id, p.parent_id)
+             JOIN doctor_employer de ON de.employer_id = ccp.companyId
+             JOIN doctor d ON d.id = de.doctor_id
+             JOIN connect_provider cp ON cp.doctor_id = d.id
+             WHERE p.id = :patientId
+                AND ccp.isActive = true
+                AND d.active = 1`,
+            { replacements: { patientId }, type: QueryTypes.SELECT }
+        );
+        return rows.map(row => Number(row.doctorId));
+    }
+
+    static async ensureCareTeamExists(patientId) {
+        const existing = await PatientCareTeam.findOne({ where: { patientId } });
+        if (existing) {
+            return;
+        }
+        const doctorIds = await PatientCareTeamService.getCompanyDoctorIds(patientId);
+        if (doctorIds.length === 0) {
+            return;
+        }
+        const entries = doctorIds.map(doctorId => ({ patientId, doctorId }));
+        await PatientCareTeam.bulkCreate(entries, { ignoreDuplicates: true });
+    }
+
     static async getCareTeam(patientId, search) {
         let query = `
             SELECT 

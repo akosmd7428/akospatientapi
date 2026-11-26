@@ -14,7 +14,7 @@ class NotificationController {
             if (!title) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'title is required');
             }
-            const result = await NotificationService.createNotification({ title, description, referenceId: req.user.id, role: req.user.role });
+            const result = await NotificationService.createNotification({ title, description, referenceId: req.selectedPatientId, role: req.user.role });
         return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.notificationCreated, { result });
     } catch (error) {
       return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
@@ -25,7 +25,7 @@ class NotificationController {
         try {
             // role and referenceId sent by the frontends are ignored, the caller only sees their own notifications
             const { filter = 'all' } = req.query;
-            const notifications = await NotificationService.getNotifications(req.user.role, req.user.id, filter);
+            const notifications = await NotificationService.getNotifications(req.user.role, req.selectedPatientId, filter);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.notificationFetched, { notifications });
         } catch (error) {
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
@@ -35,7 +35,7 @@ class NotificationController {
     static async removeNotification(req, res) {
         try {
             const { notificationId } = req.body;
-            const notification = await NotificationService.removeNotification(notificationId, req.user.id, req.user.role);
+            const notification = await NotificationService.removeNotification(notificationId, req.selectedPatientId, req.user.role);
             
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.notificationDeleted, { notification });
         } catch (error) {
@@ -45,7 +45,7 @@ class NotificationController {
 
     static async updateReadNotification(req, res) {
         try {
-            const notification = await NotificationService.updateReadNotification(req.user.id, req.user.role);
+            const notification = await NotificationService.updateReadNotification(req.selectedPatientId, req.user.role);
             
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Notifications updated successfully", { notification });
         } catch (error) {

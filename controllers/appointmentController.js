@@ -13,7 +13,8 @@ class AppointmentController {
         try {
             const { doctorId, date, time} = req.body;
             // appointments are always booked for the logged in patient
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
+            await PatientCareTeamService.ensureCareTeamExists(patientId);
             // only a doctor of a company the patient is connected to
             const allowedDoctorIds = await PatientCareTeamService.getAllowedDoctorIds(patientId, [doctorId]);
             if (!allowedDoctorIds.includes(Number(doctorId))) {
@@ -55,7 +56,7 @@ class AppointmentController {
     static async checkAppointmentStatus(req, res, next){
         try {
             const { doctorId, date, time, is_paid} = req.body;
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
             const rn = await AppointmentService.checkAppointment(patientId, doctorId, date, time,is_paid);
             if (rn && rn.alreadyExists) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_409_CONFLICT, 'An appointment already exists');
@@ -80,7 +81,7 @@ class AppointmentController {
         // try {
             const { status } = req.params;
             const { search } = req.query;
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
     
             const appointments = await AppointmentService.getAppointmentsByStatus(patientId, status, search);
     
@@ -212,7 +213,7 @@ class AppointmentController {
     // the logged in patient's medicines as /appointment/my-medicines returns them (also used by the plan handler)
     static async getFormattedMedicines(req) {
             let { search, timeFilter } = req.query;
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
         
             const medicines = await AppointmentService.getMyMedicines(patientId, '2', search, timeFilter);
 
@@ -253,7 +254,7 @@ class AppointmentController {
     static async rescheduleAppointment(req, res) {
         try {
             const { appointmentId, date, time } = req.body;
-            const appointment = await Appointment.findOne({ where: { id: appointmentId, patientId: req.user.id } });
+            const appointment = await Appointment.findOne({ where: { id: appointmentId, patientId: req.selectedPatientId } });
             if (!appointment) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.noAppointmentsFound);
             }
@@ -268,7 +269,7 @@ class AppointmentController {
     static async cancelAppointment(req, res) {
         try {
             const { appointmentId } = req.body;
-            const appointment = await Appointment.findOne({ where: { id: appointmentId, patientId: req.user.id } });
+            const appointment = await Appointment.findOne({ where: { id: appointmentId, patientId: req.selectedPatientId } });
             if (!appointment) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.noAppointmentsFound);
             }
@@ -283,7 +284,7 @@ class AppointmentController {
     static async getAppointmentDetails(req, res, next) {
         try {
             const { appointmentId } = req.params;
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
 
             const appointmentDetails = await AppointmentService.getAppointmentDetails(appointmentId, patientId);
             if (!appointmentDetails) {
@@ -361,7 +362,7 @@ class AppointmentController {
 
     static async getMedicalRecords(req, res, next) {
         try {
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
             // the care plan name is only looked up for a company the patient is connected to
             const companyId = (await PatientService.isPatientConnectedToCompany(patientId, req.params.companyId)) ? req.params.companyId : null;
 
@@ -418,7 +419,7 @@ class AppointmentController {
     static async fetchCallDetails(req, res, next) {
         try {
             // the patientId in the body is ignored, call details are only for the logged in patient
-            const data = await AppointmentService.fetchDoctorIds(req.user.id);
+            const data = await AppointmentService.fetchDoctorIds(req.selectedPatientId);
 
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.dataFetched, { data });
         } catch (error) {
@@ -428,7 +429,8 @@ class AppointmentController {
 
     static async talkToDoctor(req, res, next) {
         try {
-            const response = await AppointmentController.buildTalkToDoctorResponse(req.user.id);
+            await PatientCareTeamService.ensureCareTeamExists(req.selectedPatientId);
+            const response = await AppointmentController.buildTalkToDoctorResponse(req.selectedPatientId);
             if (!response) {
                 // 4xx so the message is not stripped like 500 errors, the patient app shows errors/message in a toast
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, AppointmentController.NO_DOCTOR_MESSAGE, AppointmentController.NO_DOCTOR_MESSAGE);
@@ -487,7 +489,7 @@ class AppointmentController {
     // Sent unencrypted, the same as the newapi response it replaces: { access_token }
     static async connectToken(req, res, next) {
         try {
-            const accessToken = await AppointmentService.getConnectToken(req.user.id);
+            const accessToken = await AppointmentService.getConnectToken(req.selectedPatientId);
             if (!accessToken) {
                 return CommonHelper.sendErrorUnencrypt(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, 'Unable to get call token');
             }
@@ -499,7 +501,7 @@ class AppointmentController {
 
     static async dashboard(req, res, next) {
         try {
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
 
             const dashboardDetails = await AppointmentService.getDashboardData(patientId);
             const healthDetails = await VitalMonitoringService.getPatientDeviceRating(patientId); 

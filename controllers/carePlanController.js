@@ -8,7 +8,7 @@ const { STATUS_CODE } = require('../config/constant');
 const getCarePlanDetails = async (req, res) => {
     try {
         // the care plan is always for the logged in patient, the patientId query param is ignored
-        const patientId = req.user.id;
+        const patientId = req.selectedPatientId;
         const { companyId } = req.query;
         if (!(await PatientService.isPatientConnectedToCompany(patientId, companyId))) {
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, 'Access denied');

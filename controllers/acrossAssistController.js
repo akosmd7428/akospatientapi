@@ -15,7 +15,7 @@ class AcrossAssistController {
                 source: 'manual',
                 event: 'manual',
                 referenceId: req.body.appointment_id,
-                patientId: req.user && req.user.id,
+                patientId: req.user && req.selectedPatientId,
             });
             if (!result.ok) {
                 return CommonHelper.sendError(res, HTTP_502_BAD_GATEWAY, 'Across Assist appointment confirmation failed', [{

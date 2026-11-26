@@ -36,8 +36,16 @@ const SSO_DEEPLINK_PAGES = {
     client_pharmacy_avail: '/MyMedicine',
 };
 
+// history/listing page for each deeplink, used as view_history_url in the sso-deeplink response
+const SSO_DEEPLINK_HISTORY_PAGES = {
+    client_talk_to_doctor: '/TalkToDoctor',
+    client_lab_test: '/LabTests',
+    client_book_appointment: '/MyAppointments',
+    client_pharmacy_avail: '/MyMedicine',
+};
+
 // assessments.id of the "Health Risk" assessment, the one the hr portal reports as HRA
 const HRA_ASSESSMENT_ID = Number(process.env.HRA_ASSESSMENT_ID) || 7;
 
-module.exports = { STATUS_CODE, BEHAVIOURAL_HEALTH, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH, SSO_DEEPLINK_PAGES, HRA_ASSESSMENT_ID };
+module.exports = { STATUS_CODE, BEHAVIOURAL_HEALTH, SSO_REDIRECT_PAGES, SSO_DEFAULT_REDIRECT_PATH, SSO_DEEPLINK_PAGES, SSO_DEEPLINK_HISTORY_PAGES, HRA_ASSESSMENT_ID };
 module.exports.DEFAULT_PATIENT_PASSWORD = process.env.DEFAULT_PATIENT_PASSWORD || 'Akosmd@123'; // temporary default for hr/migrated patients, must be replaced by a set-password link

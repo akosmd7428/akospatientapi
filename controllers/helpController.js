@@ -23,7 +23,7 @@ class HelpController {
     try {
       const { message } = req.body;
       // look the patient up by the token id, the email in the token can be shared with dependents
-      const patient = await HelpService.getPatientDetailsById(req.user.id);
+      const patient = await HelpService.getPatientDetailsById(req.selectedPatientId);
 
       const { subject, html } = EmailTemplates.adminRequest({
           subject: 'Patient Help Request',
@@ -32,7 +32,7 @@ class HelpController {
           message,
       });
 
-      const msg = await emailHelperSMTP(req.user.id, SEND_CONTACT_EMAIL_TO_ADMIN, subject, html);
+      const msg = await emailHelperSMTP(req.selectedPatientId, SEND_CONTACT_EMAIL_TO_ADMIN, subject, html);
 
       return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, msg);
     } catch (error) {

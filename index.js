@@ -80,7 +80,7 @@ const corsOptions = {
   // a trailing "/" in the list is removed, a browser origin never ends with one
   origin: (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS).split(',').map(origin => origin.trim().replace(/\/+$/, '')).filter(Boolean),
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-  allowedHeaders: ['Content-Type', 'Authorization', 'role', 'companyId', 'x-sync-api-key','x-client-id','x-client-secret'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'role', 'companyId', 'x-sync-api-key','x-client-id','x-client-secret','x-selected-patient-id'],
 };
 
 app.use(cors(corsOptions));

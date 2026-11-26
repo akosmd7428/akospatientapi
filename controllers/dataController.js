@@ -183,7 +183,7 @@ class DataController {
         try {
             const { call_id } = req.body;
             // a patient can only look up their own waiting room entry
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
             const sql = `
                     SELECT patient.gender, 
                         patientDetails.age, 

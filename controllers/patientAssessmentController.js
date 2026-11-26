@@ -13,7 +13,7 @@ class PatientAssessmentController {
         try {
             const { id, assessmentId, assessmentQuestionId, assessmentOptionId } = req.body;
             // only known fields are saved, and always for the logged in patient
-            const data = { assessmentId, assessmentQuestionId, assessmentOptionId, patientId: req.user.id };
+            const data = { assessmentId, assessmentQuestionId, assessmentOptionId, patientId: req.selectedPatientId };
             if (id) data.id = id;
             // Call service method to create patient assessment
             const patientAssessment = await PatientAssessmentService.createOrUpdatePatientAssessment(data);
@@ -27,7 +27,7 @@ class PatientAssessmentController {
     static async createPatientAssessments(req, res, next) {
         try {
             // the answers are always stored for the logged in patient, patientId from the body is ignored
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
             const body = { ...req.body, patientId };
             const { assessmentId, level, levelName } = body;
             if (!Array.isArray(body.responses) || !body.responses.length) {
@@ -309,11 +309,11 @@ class PatientAssessmentController {
             }
             // only known fields are saved, and always for the logged in patient
             const body = req.body.map(({ assessmentId, assessmentQuestionId, assessmentOptionId }) => ({
-                assessmentId, assessmentQuestionId, assessmentOptionId, patientId: req.user.id,
+                assessmentId, assessmentQuestionId, assessmentOptionId, patientId: req.selectedPatientId,
             }));
             // Call service method to create multiple patient assessments
             await PatientAssessmentService.createBehaviouralHealth(body);
-            const assessmentResponse = await PatientAssessmentService.calculateSeverity(req.user.id, body);
+            const assessmentResponse = await PatientAssessmentService.calculateSeverity(req.selectedPatientId, body);
             assessmentResponse.statement =  BEHAVIOURAL_HEALTH.STRING_BEGIN + assessmentResponse.severity +BEHAVIOURAL_HEALTH.STRING_END;
             return sendSuccess(res, true, STATUS_CODE.HTTP_201_CREATED, messages.assessmentCreated, { assessmentResponse });
         } catch (error) {
@@ -323,7 +323,7 @@ class PatientAssessmentController {
 
     static async getPatientAssessments(req, res, next) {
         try {
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
             const assessments = await PatientAssessmentService.getPatientAssessments(patientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.assessmentsFetched, { assessments });
         } catch (error) {
@@ -333,7 +333,7 @@ class PatientAssessmentController {
 
     static async assessmentTakenByPatient(req, res, next) {
         try {
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
             const assessments = await PatientAssessmentService.assessmentTakenByPatient(patientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.assessmentsFetched, { assessments });
         } catch (error) {
@@ -343,7 +343,7 @@ class PatientAssessmentController {
 
     static async getPatientAssessmentsDetails(req, res, next) {
         try {
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
             const { assessmentId } = req.params;
             const assessments = await PatientAssessmentService.getPatientAssessmentsDetails(patientId,assessmentId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.assessmentsFetched, { assessments });

@@ -21,7 +21,7 @@ class PatientController {
 
     static async getPatientProfileDetails(req, res) {
         try {
-            const patientProfileDetails = await PatientService.getPatientProfileDetails(req.user.id);
+            const patientProfileDetails = await PatientService.getPatientProfileDetails(req.selectedPatientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.profileRetrieved, { patientProfileDetails });
         } catch (error) {
             CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
@@ -35,9 +35,9 @@ class PatientController {
             let patient;
             let errorPatient = 0;
             // the profile images already saved for this patient and its dependents stay valid even when not on our upload host
-            const familyIds = [req.user.id, ...(await Patient.findAll({
+            const familyIds = [req.selectedPatientId, ...(await Patient.findAll({
                 attributes: ['id'],
-                where: { parent_id: req.user.id },
+                where: { parent_id: req.selectedPatientId },
                 raw: true
             })).map(row => row.id)];
             const storedImages = (await PatientDetail.findAll({
@@ -48,7 +48,7 @@ class PatientController {
             const { error } = createOrUpdatePatientSchema.validate(req.body, { context: { storedImages } });
             if (error) return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, error.details[0].message);
 
-            patient = await Patient.findByPk(req.user.id);
+            patient = await Patient.findByPk(req.selectedPatientId);
             if (!patient) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.userNotFound);
             }
@@ -59,7 +59,7 @@ class PatientController {
                     const dependentId = parseInt(dependent.id, 10);
                     const newEmail = dependent.email ? String(dependent.email).trim() : '';
                     if (!dependentId || !newEmail) continue;
-                    const existingDependent = await Patient.findOne({ where: { id: dependentId, parent_id: req.user.id } });
+                    const existingDependent = await Patient.findOne({ where: { id: dependentId, parent_id: req.selectedPatientId } });
                     if (!existingDependent || String(existingDependent.email || '').trim().toLowerCase() === newEmail.toLowerCase()) continue;
                     const emailOwner = await Patient.findOne({ where: { email: newEmail, id: { [Sequelize.Op.ne]: dependentId } }, attributes: ['id'] });
                     if (emailOwner) {
@@ -71,7 +71,7 @@ class PatientController {
             if(req.body.age != '' && req.body.age > 17){
                 // email is the login identity and is read-only on the profile page, it is not changed here
                 await patient.update({ first_name, last_name, phone, dateofbirth, gender, city, state, zip_code });
-                await PatientService.createOrUpdatePatientProfile(req.body, req.user.id);
+                await PatientService.createOrUpdatePatientProfile(req.body, req.selectedPatientId);
                 await patient.update({ isProfileCompleted : true, isFirstLogin : true });
             }else{
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, messages.patientAgeError);
@@ -80,7 +80,7 @@ class PatientController {
             // Delete existing dependents and their details
             const dependentIds = (await Patient.findAll({
                 attributes: ['id'],
-               where: { parent_id: req.user.id },
+               where: { parent_id: req.selectedPatientId },
                 raw: true
             })).map(patient => patient.id);          
            // store current dependent
@@ -120,13 +120,13 @@ class PatientController {
                    });                    
                 //   Delete dependents in the Patient table
                // only the removed dependents, deleting every dependent of the parent also dropped the ones still on the form
-               // await Patient.destroy({ where: { parent_id: req.user.id } });
-               await Patient.destroy({ where: { parent_id: req.user.id, id: { [Sequelize.Op.in]: toBeDeleteIds } } });
+               // await Patient.destroy({ where: { parent_id: req.selectedPatientId } });
+               await Patient.destroy({ where: { parent_id: req.selectedPatientId, id: { [Sequelize.Op.in]: toBeDeleteIds } } });
             }
             // Delete existing dependents and their details
             // const dependentIds = (await Patient.findAll({
             //     attributes: ['id'],
-            //     where: { parent_id: req.user.id },
+            //     where: { parent_id: req.selectedPatientId },
             //     raw: true
             // })).map(patient => patient.id);
             
@@ -149,7 +149,7 @@ class PatientController {
             // });
             
             // Delete dependents in the Patient table
-            // await Patient.destroy({ where: { parent_id: req.user.id } });
+            // await Patient.destroy({ where: { parent_id: req.selectedPatientId } });
 
             //Create or Update Dependents for Patient
             if (dependents && Array.isArray(dependents)) {
@@ -159,13 +159,13 @@ class PatientController {
                         const { first_name, last_name } = getFirstAndLastName(fullname);   
                         if (id) {
                             // only dependents of the logged in patient can be updated
-                            let existingDependent = await Patient.findOne({ where: { id, parent_id: req.user.id } });
+                            let existingDependent = await Patient.findOne({ where: { id, parent_id: req.selectedPatientId } });
                             if (!existingDependent) {
                                 continue;
                             }
                             await existingDependent.update({ first_name, last_name, email, phone, dateofbirth, gender, city, state, zip_code });
                         } else {
-                            const newDependent = await Patient.create({ first_name, last_name, email, phone, dateofbirth, gender, city, state, zip_code, parent_id: req.user.id });
+                            const newDependent = await Patient.create({ first_name, last_name, email, phone, dateofbirth, gender, city, state, zip_code, parent_id: req.selectedPatientId });
                             id = newDependent.id;
                         }
                         //Handle Dependents Details and Family History
@@ -174,7 +174,7 @@ class PatientController {
                         console.log(dependent,'dependent====');
                         console.log(id,'id====');
                         
-                        if(dependent.age > 17 && dependent.id != req.user.id){
+                        if(dependent.age > 17 && dependent.id != req.selectedPatientId){
                             const profileCompletionLink = `${PATIENT_FRONTEND_URL}/forgot-password?email=${encodeURIComponent(dependent.email)}`;
                             const { subject, html } = EmailTemplates.dependentInvite({ link: profileCompletionLink });
                             emailHelperSMTP(dependent.email, dependent.email, subject, html);
@@ -254,7 +254,7 @@ class PatientController {
                 throw new Error("Invalid input");
             }
             // the prescribing doctor is always the logged in doctor, never the email sent in the body
-            const doctor = await Doctor.findOne({ where: { id: req.user.id } });
+            const doctor = await Doctor.findOne({ where: { id: req.selectedPatientId } });
             if (!doctor) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_403_FORBIDDEN, 'Access denied');
             }
@@ -333,7 +333,7 @@ class PatientController {
                 // decryptedEmail += String.fromCharCode(email.charCodeAt(i) ^ secretKey.charCodeAt(i % secretKey.length));
             // }
             // if(decryptedEmail){
-                doctor = await Doctor.findOne({ where: { id: req.user.id } });
+                doctor = await Doctor.findOne({ where: { id: req.selectedPatientId } });
                 if(!doctor){
                     throw new Error("Something went wrong!");
                 }
@@ -406,7 +406,7 @@ class PatientController {
     static async updateProfile(req, res) {
         try {
             // a patient can only update itself, a care navigator only patients of its companies
-            let patientId = req.user.id;
+            let patientId = req.selectedPatientId;
             if (req.user.role === 'careNavigator') {
                 patientId = parseInt(req.body.patientId, 10);
                 if (!patientId || !(await PatientService.isPatientInCompanies(patientId, req.careCompanyIds))) {
@@ -432,7 +432,7 @@ class PatientController {
             }
 
             // notes are saved on the logged in patient, the patientId in the body is ignored
-            const patientDetail = await PatientService.updateNotes({ notes: req.body.notes, patientId: req.user.id });
+            const patientDetail = await PatientService.updateNotes({ notes: req.body.notes, patientId: req.selectedPatientId });
             if(patientDetail){
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, "Success", { patientDetail });
             }
@@ -444,7 +444,7 @@ class PatientController {
     
     static async getFamilyMembers(req, res) {
         try {
-            const familyMembers = await PatientService.getFamilyMembersList(req.user.id);
+            const familyMembers = await PatientService.getFamilyMembersList(req.selectedPatientId);
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.familyMembersFetched, { familyMembers });
         } catch (error) {
             return CommonHelper.sendError(res, STATUS_CODE.HTTP_500_INTERNAL_SERVER_ERROR, messages.serverError, error.message);
@@ -455,7 +455,7 @@ class PatientController {
         try {
           let userDetails;
           //Login as Patient after first time
-          const patient = await Patient.findOne( { where : { id : req.user.id } } );
+          const patient = await Patient.findOne( { where : { id : req.selectedPatientId } } );
           if(patient) {
             userDetails = await PatientService.getPatientDetailsByEmail(patient.email, patient);
             if (userDetails.length === 0) {

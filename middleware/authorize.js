@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { JWT_SECRET, JWT_ALGORITHM, JWT_ISSUER, DOCTOR_JWT_ISSUER } = require('../config/secret');
 const messages = require('../config/language').messages;
 const { STATUS_CODE } = require('../config/constant');
+const selectedPatient = require('./selectedPatient');
 
 // roles carried in the login token, the doctor token is issued by doctorportalapi with the same secret
 const ROLES = {
@@ -88,7 +89,8 @@ const authorize = (...allowedRoles) => (req, res, next) => {
     }
 
     req.user = decoded;
-    next();
+
+    selectedPatient(req, res, next);
 };
 
 // sign options for every login token this api issues

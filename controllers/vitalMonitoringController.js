@@ -24,7 +24,7 @@ class VitalMonitoringController {
      static async getDeviceMonitoring(req, res) {
         try {
             // the logged in patient's readings only, patient_id from the query is ignored
-            const patient_id = req.user.id;
+            const patient_id = req.selectedPatientId;
             const monitoryDetails = await VitalMonitoringService.getDeviceMonitoring(patient_id);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { monitoryDetails });
         } catch (error) {
@@ -36,7 +36,7 @@ class VitalMonitoringController {
         try {
            
             const { deviceDetails } = req.body;
-            const patient_id = req.user.id;
+            const patient_id = req.selectedPatientId;
             if (!Array.isArray(deviceDetails)) {
                 return CommonHelper.sendError(res, STATUS_CODE.HTTP_400_BAD_REQUEST, 'deviceDetails is required');
             }
@@ -69,7 +69,7 @@ class VitalMonitoringController {
     static async getDetailMonitoring(req, res) {
         try {           
             const { device_id, from_date, to_date} = req.query;
-            const patient_id = req.user.id;
+            const patient_id = req.selectedPatientId;
            
             const monitoringData = await VitalMonitoringService.getVitalMonitoringDetails(patient_id, device_id, from_date, to_date);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { monitoringData });
@@ -80,7 +80,7 @@ class VitalMonitoringController {
     static async getDetailMonitoring(req, res) {
         try {           
             const { device_id, from_date, to_date} = req.query;
-            const patient_id = req.user.id;
+            const patient_id = req.selectedPatientId;
             const monitoringData = await VitalMonitoringService.getVitalMonitoringDetails(patient_id, device_id, from_date, to_date);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { monitoringData });
         } catch (error) {
@@ -91,7 +91,7 @@ class VitalMonitoringController {
     static async viewDeviceComment(req, res){
         try{
             const { device_id} = req.query;
-            const patient_id = req.user.id;
+            const patient_id = req.selectedPatientId;
             const deviceComments = await VitalMonitoringService.getDeviceComment(patient_id, device_id);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { deviceComments });
         }catch(error){
@@ -105,17 +105,17 @@ class VitalMonitoringController {
             // the comment is always attached to the logged in patient, id/status/patient_id from the client are ignored
             // care navigator comments (sso session, user_type 2) keep created_by only when it is a care navigator
             // of the patient's company, everything else is a comment by the logged in patient
-            let authorId = req.user.id;
+            let authorId = req.selectedPatientId;
             let authorType = USER_TYPE_PATIENT;
             if (Number(user_type) === USER_TYPE_CARE_NAVIGATOR && created_by) {
-                const patient = await Patient.findOne({ where: { id: req.user.id } });
+                const patient = await Patient.findOne({ where: { id: req.selectedPatientId } });
                 const careNavigators = patient ? await LabTestService.getCareNavigatorsForPatient(patient) : [];
                 if (careNavigators.some(row => Number(row.id) === Number(created_by))) {
                     authorId = Number(created_by);
                     authorType = USER_TYPE_CARE_NAVIGATOR;
                 }
             }
-            const post_details = { device_id, comment, created_by: authorId, user_type: authorType, patient_id: req.user.id };
+            const post_details = { device_id, comment, created_by: authorId, user_type: authorType, patient_id: req.selectedPatientId };
             const deviceComments = await VitalMonitoringService.postDeviceComment(post_details);            
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.vitalDeviceFetched, { deviceComments });
         }catch(error){

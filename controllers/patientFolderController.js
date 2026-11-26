@@ -8,7 +8,7 @@ class patientFolderController {
         try {
             const { search } = req.query;
             const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
 
             const folders = await patientFolderService.getFolders(patientId, page, search);
 
@@ -21,7 +21,7 @@ class patientFolderController {
     static async getFiles(req, res) {
         try {
             const { folderId, timeFilter = 0, search } = req.query;
-            const patientId = req.user.id;
+            const patientId = req.selectedPatientId;
 
             const files = await patientFolderService.getFiles(patientId, folderId, timeFilter, search);
 

@@ -39,7 +39,7 @@ class PlanServiceController {
     static async checkCallPaymentStatus(req, res, existing) {
         const { company_id, service } = req.query;
         if (!SubscriptionUsage.isService(service)) return existing();
-        if (!(await LabTestService.isPatientCompany(req.user.id, company_id))) return existing();
+        if (!(await LabTestService.isPatientCompany(req.selectedPatientId, company_id))) return existing();
         const allowance = await SubscriptionUsage.getAllowance(req.user, service);
         if (!allowance) return existing();
         if (allowance.remaining > 0) {
@@ -47,7 +47,7 @@ class PlanServiceController {
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'Data Fetched Successfully', { data });
         }
         // talk to doctor already paid (payment not used by a call yet): no second payment
-        if (service === 'practitioner' && await SubscriptionUsage.unusedCallPayment(req.user.id)) {
+        if (service === 'practitioner' && await SubscriptionUsage.unusedCallPayment(req.selectedPatientId)) {
             const data = { is_paid: 0, plan: { ...planInfo(service, allowance), paid: true } };
             return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, 'Data Fetched Successfully', { data });
         }
@@ -62,7 +62,7 @@ class PlanServiceController {
     // GET /labs/orders/:orderId - the cart summary: a new, unpaid order is shown free while the plan has a lab test left
     static async getLabOrdersByPatient(req, res, existing) {
         const { orderId } = req.params;
-        const order = await LabOrder.findOne({ where: { id: orderId, patientId: req.user.id, isDeleted: false }, attributes: ['id', 'uniqueBookingId', 'paymentStatus'] });
+        const order = await LabOrder.findOne({ where: { id: orderId, patientId: req.selectedPatientId, isDeleted: false }, attributes: ['id', 'uniqueBookingId', 'paymentStatus'] });
         if (!order || order.uniqueBookingId != null || order.paymentStatus === 'paid') return existing();
         const allowance = await SubscriptionUsage.getAllowance(req.user, 'labTests');
         if (!allowance || allowance.remaining <= 0) return existing();
@@ -83,7 +83,7 @@ class PlanServiceController {
         return async (req, res, existing) => {
             const { cartId, orderId } = req.body;
             const order = await LabOrder.findOne({
-                where: { id: orderId, patientId: req.user.id, isDeleted: false },
+                where: { id: orderId, patientId: req.selectedPatientId, isDeleted: false },
                 attributes: ['uniqueBookingId', 'paymentStatus', 'orderStatus'],
             });
             // not found, already started or already paid: the existing code answers exactly as before
@@ -106,7 +106,7 @@ class PlanServiceController {
                     await SubscriptionUsage.release(planUse);
                     return CommonHelper.sendError(res, STATUS_CODE.HTTP_404_NOT_FOUND, messages.labOrderNotFound);
                 }
-                await LabTestService.removeCart(cartId, req.user.id);
+                await LabTestService.removeCart(cartId, req.selectedPatientId);
                 return CommonHelper.sendSuccess(res, true, STATUS_CODE.HTTP_200_OK, messages.bookingConfirmed, { uniqueBookingId, plan: planInfo('labTests', planUse) });
             } catch (error) {
                 await SubscriptionUsage.release(planUse);
@@ -128,7 +128,7 @@ class PlanServiceController {
      */
     static async bookAppointment(req, res, existing) {
         const { doctorId, date, time } = req.body;
-        const patientId = req.user.id;
+        const patientId = req.selectedPatientId;
 
         // 1 + 2: the company's plan and what the user already used of its careAppointment
         const allowance = await SubscriptionUsage.getAllowance(req.user, 'careAppointment');
@@ -209,7 +209,7 @@ class PlanServiceController {
 
     // GET /care/plan: the care plan page shows the plan counts (per patient, per period) for the plan in use
     static async getCarePlanDetails(req, res, existing) {
-        const patientId = req.user.id;
+        const patientId = req.selectedPatientId;
         const { companyId } = req.query;
         if (!(await PatientService.isPatientConnectedToCompany(patientId, companyId))) return existing();
         const carePlans = await CarePlanService.getCarePlanDetailsByCompanyId(companyId, patientId);
