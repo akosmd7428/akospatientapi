@@ -1605,7 +1605,7 @@ class PatientService {
             }
 
             // const existing = await Patient.findOne({ where: { email }, attributes: ['id', 'parent_id', 'companyId', 'employer_id'] });
-            const existing = await Patient.findOne({ where: { email }, attributes: ['id', 'parent_id', 'companyId', 'employer_id', 'isProfileCompleted'] });
+            const existing = await Patient.findOne({ where: { email }, attributes: ['id', 'parent_id', 'companyId', 'employer_id', 'isProfileCompleted', 'first_name', 'last_name', 'dateofbirth', 'gender', 'phone'] });
             if (existing) {
                 // created on an earlier login, or the email belongs to another account which is never taken over
                 if (Number(existing.parent_id) !== Number(patient.id)) {
@@ -1613,14 +1613,32 @@ class PatientService {
                 } else {
                     const changes = {};
                     if (companyId && (Number(existing.companyId) !== Number(companyId) || Number(existing.employer_id) !== Number(companyId))) {
-                        // a dependant of this patient always follows the patient's company
                         Object.assign(changes, { companyId, employer_id: companyId });
                     }
                     if (profileCompleted === 1 && Number(existing.isProfileCompleted) !== 1) {
                         changes.isProfileCompleted = 1;
                     }
+                    const last_name = String(dependant.last_name || '').trim();
+                    if (first_name) {
+                        changes.first_name = first_name;
+                    }
+                    if (last_name) {
+                        changes.last_name = last_name;
+                    }
+                    if (dependant.date_of_birth) {
+                        changes.dateofbirth = dependant.date_of_birth;
+                    }
+                    if (dependant.gender) {
+                        changes.gender = dependant.gender;
+                    }
+                    if (dependant.mobile_number) {
+                        changes.phone = dependant.mobile_number;
+                    }
                     if (Object.keys(changes).length) {
                         await existing.update(changes);
+                    }
+                    if (dependant.member_id) {
+                        await PatientService.setPatientMemberId(existing.id, dependant.member_id);
                     }
                 }
                 continue;

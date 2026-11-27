@@ -103,8 +103,8 @@ const ssoDeeplinkSchema = Joi.object({
   dob: Joi.string().trim().max(20).allow('', null).optional(),
   deeplink: Joi.string().trim().max(500).allow('', null).optional(),
   // the care plan the member may use through this link: the plan's code (careplans.plan_code), the plan must be
-  // assigned to the client's company
-  plan_id: Joi.alternatives().try(Joi.string().trim().max(20), Joi.number()).required(),
+  // assigned to the client's company; optional — when empty the response redirect_url is empty
+  plan_id: Joi.alternatives().try(Joi.string().trim().max(20), Joi.number()).allow('', null).optional(),
   // older camelCase name of the same field, still accepted but it has to be the same value as plan_id
   planId: Joi.alternatives().try(Joi.string().trim().max(50), Joi.number()).allow('', null).optional(),
 });
