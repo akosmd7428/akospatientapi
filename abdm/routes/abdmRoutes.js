@@ -3,6 +3,9 @@ const router = express.Router();
 const { generateToken } = require('../services/gatewayService');
 const { fetchCertificate } = require('../services/encryptionService');
 const m1Routes = require('./m1Routes');
+const m2Routes = require('./m2Routes');
+const m3Routes = require('./m3Routes');
+const m4Routes = require('./m4Routes');
 
 // Health check - test ABDM gateway connectivity, credentials and certificate
 router.get('/health', async (req, res) => {
@@ -36,13 +39,13 @@ router.get('/health', async (req, res) => {
 // M1 - ABHA creation, login, profile, linking
 router.use('/m1', m1Routes);
 
-// M2 routes (Phase 3 - Care context linking)
-// router.use('/m2', m2Routes);
+// M2 routes — HIP (care context linking + FHIR data transfer)
+router.use('/m2', m2Routes);
 
-// M3 routes (Phase 4 - Consent & data fetch)
-// router.use('/m3', m3Routes);
+// M3 routes — HIU (consent requests + health data fetch)
+router.use('/m3', m3Routes);
 
-// M4 routes (Phase 1 - Facility registration)
-// router.use('/m4', m4Routes);
+// M4 routes (HP-ID creation for healthcare professionals)
+router.use('/m4', m4Routes);
 
 module.exports = router;

@@ -6,7 +6,8 @@ const {
   ABDM_BRIDGE_URL,
   ABDM_BRIDGE_ID,
   ABDM_HFR_ID,
-  ABDM_HIP_ID
+  ABDM_HIP_ID,
+  ABDM_HPR_URL
 } = require('../../config/secret');
 
 module.exports = {
@@ -14,6 +15,9 @@ module.exports = {
   gatewayUrl: ABDM_GATEWAY_URL || 'https://dev.abdm.gov.in/api/hiecm/gateway',
   // ABHA service (M1 - enrollment, login, profile)
   abhaUrl: ABDM_ABHA_URL || 'https://abhasbx.abdm.gov.in/abha/api',
+  // HPR service (M4 - HP-ID creation for healthcare professionals)
+  // New V4 sandbox URL — old hpridsbx.abdm.gov.in is no longer reachable
+  hprUrl: ABDM_HPR_URL || 'https://apihspsbx.abdm.gov.in/v4/int',
   clientId: ABDM_CLIENT_ID,
   clientSecret: ABDM_CLIENT_SECRET,
   bridgeUrl: ABDM_BRIDGE_URL,
@@ -59,10 +63,27 @@ module.exports = {
     consentFetch: '/consent/v3/fetch',
     healthInfoRequest: '/health-information/v3/request',
   },
-  // M4 endpoints
+  // M4 endpoints — NHPR V4 API (https://apihspsbx.abdm.gov.in/v4/int)
   m4: {
-    facilitySearch: '/facilitymanagement/v1.5/facility/search',
     bridgeUpdate: '/v1/bridges/MutipleHRPAddUpdateServices',
+    // HP-ID Registration: link-based Aadhaar flow (V4)
+    // Step 1: generate ABDM-hosted Aadhaar auth link (no encrypted Aadhaar needed)
+    hprGenerateLink: '/aadhaar/generateLink',
+    // Step 2: poll until user completes OTP on ABDM's page
+    hprIsAuthenticated: '/aadhaar/isAuthenticated',
+    // Step 3: get Aadhaar demographic data after auth
+    hprVerifyOtp: '/v2/registration/aadhaar/verifyOTP',
+    // Step 4: check if HP-ID already registered for this Aadhaar
+    hprCheckExist: '/v1/registration/aadhaar/checkHpIdAccountExist',
+    // Step 5: get HP-ID address suggestions
+    hprIdSuggestion: '/v1/registration/aadhaar/hpid/suggestion',
+    // Step 6: create HP-ID
+    hprCreateId: '/v2/registration/aadhaar/createHprIdWithPreVerified',
+    // Profile
+    hprProfile: '/v1/account/information',
+    // Auth (for existing HP-ID login — separate from registration)
+    hprAuthInit: '/api/v1/auth/init',
+    hprAuthConfirm: '/api/v1/auth/confirmWithAadhaarOtp',
   },
   // Certificate cache TTL in ms (1 hour)
   certCacheTTL: 60 * 60 * 1000,

@@ -50,6 +50,8 @@ const ABDM_BRIDGE_URL = process.env.ABDM_BRIDGE_URL;
 const ABDM_BRIDGE_ID = process.env.ABDM_BRIDGE_ID;
 const ABDM_HFR_ID = process.env.ABDM_HFR_ID;
 const ABDM_HIP_ID = process.env.ABDM_HIP_ID;
+// HPR (Health Professional Registry) - M4 HP-ID creation
+const ABDM_HPR_URL = process.env.ABDM_HPR_URL;
 
 // encryption keys and tokens, never hard-code these in the code
 const DATA_ENCRYPTION_KEY = process.env.DATA_ENCRYPTION_KEY;
@@ -124,5 +126,6 @@ module.exports = {
     ABDM_BRIDGE_URL,
     ABDM_BRIDGE_ID,
     ABDM_HFR_ID,
-    ABDM_HIP_ID
+    ABDM_HIP_ID,
+    ABDM_HPR_URL
 };

@@ -90,3 +90,27 @@ CREATE TABLE IF NOT EXISTS abdm_gateway_logs (
     INDEX idx_request_id (request_id),
     INDEX idx_module (module)
 );
+
+-- M4: HP-ID linked to healthcare professional (doctor, care navigator, OHC staff)
+CREATE TABLE IF NOT EXISTS abdm_hpid_accounts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    user_type ENUM('doctor','cnavigator','ohcstaff') NOT NULL,
+    hpr_id VARCHAR(100) NOT NULL,
+    hpr_token TEXT,
+    linked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_user (user_id, user_type)
+);
+
+-- Received health records (M3 HIU side — decrypted FHIR bundles from other providers)
+CREATE TABLE IF NOT EXISTS abdm_health_records (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    patient_id          INT NOT NULL,
+    consent_artefact_id INT,
+    record_type         ENUM('OPConsultation','Prescription','DiagnosticReport',
+                             'DischargeSummary','ImmunizationRecord','HealthDocumentRecord',
+                             'WellnessRecord','Invoice') NOT NULL,
+    fhir_bundle         JSON,
+    received_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_patient (patient_id)
+);
