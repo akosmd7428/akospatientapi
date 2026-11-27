@@ -52,6 +52,8 @@ const ABDM_HFR_ID = process.env.ABDM_HFR_ID;
 const ABDM_HIP_ID = process.env.ABDM_HIP_ID;
 // HPR (Health Professional Registry) - M4 HP-ID creation
 const ABDM_HPR_URL = process.env.ABDM_HPR_URL;
+// HIE-CM API base URL for M3 HIU operations (consent, health-info) — different from gateway URL
+const ABDM_HIECM_URL = process.env.ABDM_HIECM_URL;
 
 // encryption keys and tokens, never hard-code these in the code
 const DATA_ENCRYPTION_KEY = process.env.DATA_ENCRYPTION_KEY;
@@ -127,5 +129,6 @@ module.exports = {
     ABDM_BRIDGE_ID,
     ABDM_HFR_ID,
     ABDM_HIP_ID,
-    ABDM_HPR_URL
+    ABDM_HPR_URL,
+    ABDM_HIECM_URL
 };

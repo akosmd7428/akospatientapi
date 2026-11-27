@@ -19,16 +19,20 @@ const pendingLinkTokenRequests = new Map();
  * Generate a link token for HIP-initiated care context linking.
  * POST /api/hiecm/v3/token/generate-token
  * The result arrives via callback /v3/hip/token/on-generate-token
- * @param {string} abhaAddress - Patient's ABHA address (e.g. "john@abdm")
+ * @param {string} abhaAddress  - Patient's ABHA address (e.g. "john@abdm")
+ * @param {string} name         - Patient's full name
+ * @param {string} gender       - M | F | O
+ * @param {number} yearOfBirth  - 4-digit year
  * @returns {string} REQUEST-ID sent to gateway (use to match callback)
  */
-async function generateLinkToken(abhaAddress) {
+async function generateLinkToken(abhaAddress, name, gender, yearOfBirth) {
   const result = await callGateway(
     'post',
     abdmConfig.m2.generateToken,
-    { abhaAddress },
+    { abhaAddress, name, gender, yearOfBirth },
     'm2',
-    { 'X-HIP-ID': abdmConfig.hipId }
+    { 'X-HIP-ID': abdmConfig.hipId },
+    abdmConfig.hiecmUrl
   );
   return result.requestId;
 }
@@ -79,25 +83,27 @@ async function linkCareContext(params) {
     fhir_bundle: fhirBundle,
   });
 
-  // Call gateway to link
+  // Call gateway to link — link token goes in X-LINK-TOKEN header, not body
   const result = await callGateway(
     'post',
     abdmConfig.m2.linkCareContext,
     {
-      requestId: uuidv4(),
-      timestamp: new Date().toISOString(),
-      link: {
-        accessToken: abhaAccount.link_token,
+      abhaAddress: abhaAccount.abha_address,
+      abhaNumber: abhaAccount.abha_number || null,
+      patient: [{
+        referenceNumber: abhaAccount.abha_address,
+        display: careContextDisplay,
+        hiType: careContextType,
+        count: 1,
         careContexts: [{
-          patientReference: abhaAccount.abha_address,
-          careContextReference: careContextRef,
+          referenceNumber: careContextRef,
           display: careContextDisplay,
-          hiType: careContextType,
         }],
-      },
+      }],
     },
     'm2',
-    { 'X-HIP-ID': abdmConfig.hipId }
+    { 'X-HIP-ID': abdmConfig.hipId, 'X-LINK-TOKEN': abhaAccount.link_token },
+    abdmConfig.hiecmUrl
   );
 
   await CareContext.update(
@@ -145,22 +151,30 @@ async function handleDiscovery(body) {
   }
 
   // Send on-discover response back to gateway
+  // patient must be an array; matchedBy is required
   await callGateway(
     'post',
-    '/user-initiated-linking/v3/patient/care-context/on-discover',
+    abdmConfig.m2.onDiscover,
     {
       requestId: uuidv4(),
       timestamp: new Date().toISOString(),
       transactionId: body.transactionId,
-      patient: abhaAddress ? {
+      patient: matchedContexts.length > 0 ? [{
         referenceNumber: abhaAddress,
         display: 'Patient',
-        careContexts: matchedContexts,
-      } : null,
+        hiType: matchedContexts[0]?.hiType || 'OPConsultation',
+        count: matchedContexts.length,
+        careContexts: matchedContexts.map(c => ({
+          referenceNumber: c.referenceNumber,
+          display: c.display,
+        })),
+      }] : null,
+      matchedBy: matchedContexts.length > 0 ? ['ABHA_ADDRESS'] : [],
       response: { requestId },
     },
     'm2',
-    { 'X-HIP-ID': abdmConfig.hipId }
+    { 'X-HIP-ID': abdmConfig.hipId },
+    abdmConfig.hiecmUrl
   );
 }
 
@@ -182,7 +196,7 @@ async function handleLinkInit(body) {
 
   await callGateway(
     'post',
-    '/user-initiated-linking/v3/link/care-context/on-init',
+    abdmConfig.m2.onLinkInit,
     {
       requestId: uuidv4(),
       timestamp: new Date().toISOString(),
@@ -190,12 +204,17 @@ async function handleLinkInit(body) {
       link: {
         referenceNumber: linkRefNumber,
         authenticationType: 'DIRECT',
-        meta: { communicationMedium: 'MOBILE', communicationHint: 'OTP sent to Aadhaar-linked mobile' },
+        meta: {
+          communicationMedium: 'MOBILE',
+          communicationHint: 'OTP sent to registered mobile',
+          communicationExpiry: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        },
       },
       response: { requestId },
     },
     'm2',
-    { 'X-HIP-ID': abdmConfig.hipId }
+    { 'X-HIP-ID': abdmConfig.hipId },
+    abdmConfig.hiecmUrl
   );
 }
 
@@ -224,21 +243,28 @@ async function handleLinkConfirm(body) {
 
   pendingLinkTokenRequests.delete(linkRefNumber);
 
+  // patient must be an array per ABDM spec
   await callGateway(
     'post',
-    '/user-initiated-linking/v3/link/care-context/on-confirm',
+    abdmConfig.m2.onLinkConfirm,
     {
       requestId: uuidv4(),
       timestamp: new Date().toISOString(),
-      patient: {
+      patient: [{
         referenceNumber: pending?.patientRef || 'unknown',
         display: 'Patient',
-        careContexts,
-      },
+        hiType: careContexts[0]?.hiType || 'OPConsultation',
+        count: careContexts.length,
+        careContexts: careContexts.map(c => ({
+          referenceNumber: c.referenceNumber,
+          display: c.display,
+        })),
+      }],
       response: { requestId },
     },
     'm2',
-    { 'X-HIP-ID': abdmConfig.hipId }
+    { 'X-HIP-ID': abdmConfig.hipId },
+    abdmConfig.hiecmUrl
   );
 }
 
@@ -271,14 +297,16 @@ async function handleConsentNotify(body) {
   // Acknowledge receipt
   await callGateway(
     'post',
-    '/consent/v3/request/hip/on-notify',
+    abdmConfig.m2.consentOnNotify,
     {
       requestId: uuidv4(),
       timestamp: new Date().toISOString(),
       acknowledgement: { status: 'OK', consentId },
       response: { requestId: body.requestId },
     },
-    'm2'
+    'm2',
+    {},
+    abdmConfig.hiecmUrl
   );
 }
 
@@ -297,6 +325,21 @@ async function handleHealthInfoRequest(body) {
   const theirNonce = keyMaterial?.nonce;
 
   if (!theirPublicKey || !theirNonce || !dataPushUrl) return;
+
+  // Step 1: Acknowledge receipt of health info request to ABDM (required before data push)
+  await callGateway(
+    'post',
+    abdmConfig.m2.healthInfoOnReq,
+    {
+      requestId: uuidv4(),
+      timestamp: new Date().toISOString(),
+      hiRequest: { sessionStatus: 'ACKNOWLEDGED', transactionId },
+      response: { requestId: body.requestId },
+    },
+    'm2',
+    {},
+    abdmConfig.hiecmUrl
+  ).catch(err => console.error('[M2] health-info on-request ack failed:', err.message));
 
   // Find care contexts for this consent (by patient ABHA address from consent detail)
   // For now, fetch by transactionId if available; fall back to recent linked contexts
@@ -344,10 +387,10 @@ async function handleHealthInfoRequest(body) {
     }
   }
 
-  // Notify gateway of data flow status
+  // Step 3: Notify ABDM gateway that data transfer is done
   await callGateway(
     'post',
-    '/data-flow/v3/health-information/notify',
+    abdmConfig.m2.healthInfoNotify,
     {
       requestId: uuidv4(),
       timestamp: new Date().toISOString(),
@@ -366,7 +409,9 @@ async function handleHealthInfoRequest(body) {
         },
       },
     },
-    'm2'
+    'm2',
+    {},
+    abdmConfig.hiecmUrl
   );
 }
 

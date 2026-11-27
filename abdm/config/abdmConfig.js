@@ -7,12 +7,15 @@ const {
   ABDM_BRIDGE_ID,
   ABDM_HFR_ID,
   ABDM_HIP_ID,
-  ABDM_HPR_URL
+  ABDM_HPR_URL,
+  ABDM_HIECM_URL
 } = require('../../config/secret');
 
 module.exports = {
-  // Gateway (token generation, M2/M3 callbacks)
+  // Gateway base URL for M2 HIP operations (token, link care context)
   gatewayUrl: ABDM_GATEWAY_URL || 'https://dev.abdm.gov.in/api/hiecm/gateway',
+  // HIE-CM API base URL for M3 HIU operations (consent, health-info) — no /gateway suffix
+  hiecmUrl: ABDM_HIECM_URL || 'https://dev.abdm.gov.in/api/hiecm',
   // ABHA service (M1 - enrollment, login, profile)
   abhaUrl: ABDM_ABHA_URL || 'https://abhasbx.abdm.gov.in/abha/api',
   // HPR service (M4 - HP-ID creation for healthcare professionals)
@@ -50,11 +53,17 @@ module.exports = {
     downloadCard: '/v3/profile/account/download-abha-card',
     refreshToken: '/v3/profile/account/request/token',
   },
-  // M2 endpoints on Gateway
+  // M2 endpoints on HIE-CM (all use hiecmUrl base, not gatewayUrl)
   m2: {
-    generateToken: '/v3/hip/generateToken',
-    linkCareContext: '/v3/hip/link/carecontext',
-    smsNotify: '/v3/hip/patient/sms/notify2',
+    generateToken:    '/v3/token/generate-token',
+    linkCareContext:  '/hip/v3/link/carecontext',
+    onDiscover:       '/user-initiated-linking/v3/patient/care-context/on-discover',
+    onLinkInit:       '/user-initiated-linking/v3/link/care-context/on-init',
+    onLinkConfirm:    '/user-initiated-linking/v3/link/care-context/on-confirm',
+    consentOnNotify:  '/consent/v3/request/hip/on-notify',
+    healthInfoOnReq:  '/data-flow/v3/health-information/hip/on-request',
+    healthInfoNotify: '/data-flow/v3/health-information/notify',
+    smsNotify:        '/v3/hip/patient/sms/notify2',
   },
   // M3 endpoints on Gateway
   m3: {

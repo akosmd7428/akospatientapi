@@ -14,6 +14,20 @@ const { ConsentRequest, ConsentArtefact, HealthRecord } = require('../models');
 const ecdhKeyStore = new Map();
 
 /**
+ * ABDM-required purpose code → { text, refUri } mapping.
+ * All three fields (code, text, refUri) are required by the consent init API.
+ * text values are fixed enums defined by ABDM spec.
+ */
+const PURPOSE_MAP = {
+  CAREMGT: { text: 'Care Management',                      refUri: 'https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-purpose-of-use' },
+  BTG:     { text: 'Break the Glass',                      refUri: 'https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-purpose-of-use' },
+  PUBHLTH: { text: 'Public Health',                        refUri: 'https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-purpose-of-use' },
+  HPAYMT:  { text: 'Healthcare Payment',                   refUri: 'https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-purpose-of-use' },
+  DSRCH:   { text: 'Disease Specific Healthcare Research', refUri: 'https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-purpose-of-use' },
+  PATRQT:  { text: 'Self Requested',                       refUri: 'https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-purpose-of-use' },
+};
+
+/**
  * Initiate a consent request (doctor/CN requesting patient records from other providers).
  * POST /api/hiecm/consent/v3/request/init
  * @param {object} params
@@ -29,18 +43,18 @@ const ecdhKeyStore = new Map();
 async function initiateConsentRequest(params) {
   const { patientId, requesterId, abhaAddress, purposeCode, hiTypes, dateFrom, dateTo, expiry } = params;
 
-  // Create pending record first
-  const consentRecord = await ConsentRequest.create({
-    patient_id: patientId,
-    requester_id: requesterId,
-    purpose_code: purposeCode,
-    hi_types: hiTypes,
-    date_range_from: dateFrom,
-    date_range_to: dateTo,
-    expiry,
-    status: 'requested',
-  });
+  // Validate bridge/HIU ID is configured — ABDM rejects empty or missing IDs
+  if (!abdmConfig.bridgeId) {
+    throw new Error('ABDM_BRIDGE_ID is not configured. Set it in .env to send consent requests.');
+  }
 
+  // Resolve purpose text + refUri (both required by ABDM consent init API)
+  const purposeInfo = PURPOSE_MAP[purposeCode];
+  if (!purposeInfo) {
+    throw new Error(`Unknown purpose code: ${purposeCode}. Allowed: ${Object.keys(PURPOSE_MAP).join(', ')}`);
+  }
+
+  // Call gateway FIRST — only persist to DB if ABDM accepts (202)
   const result = await callGateway(
     'post',
     abdmConfig.m3.consentInit,
@@ -48,10 +62,21 @@ async function initiateConsentRequest(params) {
       requestId: uuidv4(),
       timestamp: new Date().toISOString(),
       consent: {
-        purpose: { code: purposeCode },
+        purpose: {
+          text: purposeInfo.text,
+          code: purposeCode,
+          refUri: purposeInfo.refUri,
+        },
         patient: { id: abhaAddress },
         hiu: { id: abdmConfig.bridgeId },
-        requester: { name: 'AKOS Care Navigator', identifier: { type: 'REGNO', value: 'AKOS-CN' } },
+        requester: {
+          name: 'AKOS Care Navigator',
+          identifier: {
+            type: 'REGNO',
+            value: 'AKOS-CN-001',
+            system: 'https://akosmd.in/provider-registry',
+          },
+        },
         hiTypes,
         permission: {
           accessMode: 'VIEW',
@@ -62,8 +87,21 @@ async function initiateConsentRequest(params) {
       },
     },
     'm3',
-    { 'X-HIU-ID': abdmConfig.bridgeId }
+    { 'X-HIU-ID': abdmConfig.bridgeId },
+    abdmConfig.hiecmUrl
   );
+
+  // ABDM accepted — create local tracking record
+  const consentRecord = await ConsentRequest.create({
+    patient_id: patientId,
+    requester_id: requesterId,
+    purpose_code: purposeCode,
+    hi_types: hiTypes,
+    date_range_from: dateFrom,
+    date_range_to: dateTo,
+    expiry,
+    status: 'requested',
+  });
 
   return { requestId: result.requestId, consentRecordId: consentRecord.id };
 }
@@ -82,7 +120,8 @@ async function checkConsentStatus(consentRequestId) {
       consentRequestId,
     },
     'm3',
-    { 'X-HIU-ID': abdmConfig.bridgeId }
+    { 'X-HIU-ID': abdmConfig.bridgeId },
+    abdmConfig.hiecmUrl
   );
   return result;
 }
@@ -101,7 +140,8 @@ async function fetchArtefact(consentId) {
       consentId,
     },
     'm3',
-    { 'X-HIU-ID': abdmConfig.bridgeId }
+    { 'X-HIU-ID': abdmConfig.bridgeId },
+    abdmConfig.hiecmUrl
   );
   return result;
 }
@@ -148,7 +188,8 @@ async function requestHealthInfo(artefactDbId) {
       },
     },
     'm3',
-    { 'X-HIU-ID': abdmConfig.bridgeId }
+    { 'X-HIU-ID': abdmConfig.bridgeId },
+    abdmConfig.hiecmUrl
   );
 
   // Store keypair keyed by REQUEST-ID so we can decrypt when data arrives

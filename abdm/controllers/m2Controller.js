@@ -13,12 +13,12 @@ const CommonHelper = require('../../helpers/commonHelper');
  */
 async function generateLinkToken(req, res) {
   try {
-    const { abhaAddress } = req.body;
-    if (!abhaAddress) {
-      return CommonHelper.sendError(res, 400, 'abhaAddress is required');
+    const { abhaAddress, name, gender, yearOfBirth } = req.body;
+    if (!abhaAddress || !name || !gender || !yearOfBirth) {
+      return CommonHelper.sendError(res, 400, 'abhaAddress, name, gender and yearOfBirth are required');
     }
 
-    const requestId = await m2Service.generateLinkToken(abhaAddress);
+    const requestId = await m2Service.generateLinkToken(abhaAddress, name, gender, Number(yearOfBirth));
     CommonHelper.sendSuccess(res, { requestId }, 200, 'Link token request sent. Token will arrive via callback.');
   } catch (err) {
     handleM2Error(res, err);

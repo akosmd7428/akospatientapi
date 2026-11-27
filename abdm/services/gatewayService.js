@@ -82,13 +82,14 @@ async function getToken() {
  * @param {object} data - Request body
  * @param {string} module - m1, m2, m3, m4
  * @param {object} [extraHeaders] - Additional headers (X-HIP-ID etc.)
+ * @param {string} [baseUrl] - Override base URL (defaults to abdmConfig.gatewayUrl)
  */
-async function callGateway(method, path, data, module, extraHeaders = {}) {
+async function callGateway(method, path, data, module, extraHeaders = {}, baseUrl = null) {
   const token = await getToken();
   const requestId = uuidv4();
   const timestamp = new Date().toISOString();
 
-  const url = `${abdmConfig.gatewayUrl}${path}`;
+  const url = `${baseUrl || abdmConfig.gatewayUrl}${path}`;
   const headers = {
     'REQUEST-ID': requestId,
     'TIMESTAMP': timestamp,
@@ -119,7 +120,7 @@ async function callGateway(method, path, data, module, extraHeaders = {}) {
     // If 401, clear token cache and retry once
     if (status === 401 && tokenCache.accessToken) {
       tokenCache = { accessToken: null, refreshToken: null, expiresAt: 0 };
-      return callGateway(method, path, data, module, extraHeaders);
+      return callGateway(method, path, data, module, extraHeaders, baseUrl);
     }
 
     throw { requestId, status, data: errData, errorCode };
